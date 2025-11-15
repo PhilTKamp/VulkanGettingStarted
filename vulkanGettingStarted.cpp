@@ -35,6 +35,7 @@ public:
     }
 
 private:
+    GLFWwindow *window = nullptr;
     vk::raii::Context context;
     vk::raii::Instance instance = nullptr;
 
@@ -94,7 +95,12 @@ private:
 
     void initWindow()
     {
+        glfwInit();
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
     }
+
     void initVulkan()
     {
     }
