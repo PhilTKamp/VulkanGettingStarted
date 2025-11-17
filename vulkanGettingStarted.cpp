@@ -630,6 +630,8 @@ private:
             glfwPollEvents();
             drawFrame();
         }
+
+        device.waitIdle();
     }
 
     void cleanup()
