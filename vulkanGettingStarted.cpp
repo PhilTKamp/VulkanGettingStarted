@@ -437,7 +437,7 @@ private:
 
     void recordCommandBuffer(uint32_t imageIndex)
     {
-        commandBuffer.begin({});
+        commandBuffers[currentFrame].begin({});
 
         transition_image_layout(
             imageIndex,
@@ -464,16 +464,16 @@ private:
             .pColorAttachments = &attachmentInfo,
         };
 
-        commandBuffer.beginRendering(renderingInfo);
+        commandBuffers[currentFrame].beginRendering(renderingInfo);
 
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+        commandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
 
-        commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height)));
-        commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
+        commandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height)));
+        commandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
 
-        commandBuffer.draw(3, 1, 0, 0);
+        commandBuffers[currentFrame].draw(3, 1, 0, 0);
 
-        commandBuffer.endRendering();
+        commandBuffers[currentFrame].endRendering();
 
         transition_image_layout(
             imageIndex,
@@ -484,7 +484,7 @@ private:
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             vk::PipelineStageFlagBits2::eBottomOfPipe);
 
-        commandBuffer.end();
+        commandBuffers[currentFrame].end();
     }
 
     void drawFrame()
@@ -541,11 +541,15 @@ private:
         renderFinishedSemaphores.clear();
         inFlightFences.clear();
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        for (size_t i = 0; i < swapChainImages.size(); i++)
         {
             presentCompleteSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
             renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
-            inFlightFences.emplace_back(device, vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled));
+        }
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            inFlightFences.emplace_back(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled});
         }
     }
 
@@ -580,7 +584,7 @@ private:
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &barrier};
 
-        commandBuffer.pipelineBarrier2(dependencyInfo);
+        commandBuffers[currentFrame].pipelineBarrier2(dependencyInfo);
     }
 
     static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT *pCallbackData, void *)
