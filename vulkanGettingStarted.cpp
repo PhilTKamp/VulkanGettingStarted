@@ -66,6 +66,10 @@ private:
     vk::raii::CommandBuffer commandBuffer = nullptr;
     uint32_t queueIndex = ~0;
 
+    vk::raii::Semaphore presentCompleteSemaphore = nullptr;
+    vk::raii::Semaphore renderFinishedSemaphore = nullptr;
+    vk::raii::Fence drawFence = nullptr;
+
     void initWindow()
     {
         glfwInit();
@@ -85,6 +89,8 @@ private:
         createImageViews();
         createGraphicsPipeline();
         createCommandPool();
+        createCommandBuffer();
+        createSyncObjects();
     }
 
     void createImageViews()
@@ -477,6 +483,13 @@ private:
 
     void drawFrame()
     {
+    }
+
+    void createSyncObjects()
+    {
+        presentCompleteSemaphore = vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
+        renderFinishedSemaphore = vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
+        drawFence = vk::raii::Fence(device, {.flags = vk::FenceCreateFlagBits::eSignaled});
     }
 
     void transition_image_layout(
