@@ -483,6 +483,46 @@ private:
 
     void drawFrame()
     {
+        queue.waitIdle();
+
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
+        recordCommandBuffer(imageIndex);
+        device.resetFences(*drawFence);
+
+        vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+        const vk::SubmitInfo submitInfo{
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &*presentCompleteSemaphore,
+            .pWaitDstStageMask = &waitDestinationStageMask,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &*commandBuffer,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &*renderFinishedSemaphore};
+
+        queue.submit(submitInfo, *drawFence);
+        while (vk::Result::eTimeout == device.waitForFences(*drawFence, vk::True, UINT64_MAX))
+            ;
+
+        const vk::PresentInfoKHR presentInfoKHR{
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &*renderFinishedSemaphore,
+            .swapchainCount = 1,
+            .pSwapchains = &*swapChain,
+            .pImageIndices = &imageIndex};
+
+        result = queue.presentKHR(presentInfoKHR);
+
+        switch (result)
+        {
+        case vk::Result::eSuccess:
+            break;
+
+        case vk::Result::eSuboptimalKHR:
+            std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR ! \n";
+            break;
+        default:
+            break;
+        }
     }
 
     void createSyncObjects()
