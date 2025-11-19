@@ -74,12 +74,23 @@ private:
     uint32_t currentFrame = 0;
     uint32_t semaphoreIndex = 0;
 
+    bool frameBufferResized = false;
+
     void initWindow()
     {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        glfwSetWindowUserPointer(window, this);
+        glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    }
+
+    static void framebufferResizeCallback(GLFWwindow *window, int width, int height)
+    {
+        auto app = reinterpret_cast<HelloTriangleApplication *>(glfwGetWindowUserPointer(window));
+
+        app->frameBufferResized = true;
     }
 
     void initVulkan()
@@ -283,6 +294,30 @@ private:
 
         swapChain = vk::raii::SwapchainKHR(device, swapChainCreateInfo);
         swapChainImages = swapChain.getImages();
+    }
+
+    void cleanUpSwapChain()
+    {
+        swapChainImageViews.clear();
+        swapChain = nullptr;
+    }
+
+    void recreateSwapChain()
+    {
+        int width = 0, height = 0;
+
+        glfwGetFramebufferSize(window, &width, &height);
+        while (width == 0 || height == 0)
+        {
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        device.waitIdle();
+
+        cleanUpSwapChain();
+        createSwapChain();
+        createImageViews();
     }
 
     vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes)
@@ -493,6 +528,17 @@ private:
             ;
 
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphores[semaphoreIndex], nullptr);
+
+        if (result == vk::Result::eErrorOutOfDateKHR)
+        {
+            recreateSwapChain();
+            return;
+        }
+        if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR)
+        {
+            throw std::runtime_error("failed to acquire swap chain image!");
+        }
+
         device.resetFences(*inFlightFences[currentFrame]);
         commandBuffers[currentFrame].reset();
 
@@ -510,25 +556,38 @@ private:
 
         queue.submit(submitInfo, *inFlightFences[currentFrame]);
 
-        const vk::PresentInfoKHR presentInfoKHR{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*renderFinishedSemaphores[imageIndex],
-            .swapchainCount = 1,
-            .pSwapchains = &*swapChain,
-            .pImageIndices = &imageIndex};
-
-        result = queue.presentKHR(presentInfoKHR);
-
-        switch (result)
+        try
         {
-        case vk::Result::eSuccess:
-            break;
+            const vk::PresentInfoKHR presentInfoKHR{
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*renderFinishedSemaphores[imageIndex],
+                .swapchainCount = 1,
+                .pSwapchains = &*swapChain,
+                .pImageIndices = &imageIndex};
 
-        case vk::Result::eSuboptimalKHR:
-            std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR ! \n";
-            break;
-        default:
-            break;
+            result = queue.presentKHR(presentInfoKHR);
+
+            if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || frameBufferResized)
+            {
+                frameBufferResized = false;
+                recreateSwapChain();
+            }
+            else if (result != vk::Result::eSuccess)
+            {
+                throw std::runtime_error("failed to present swap chain image!");
+            }
+        }
+        catch (const vk::SystemError &e)
+        {
+            if (e.code().value() == static_cast<int>(vk::Result::eErrorOutOfDateKHR))
+            {
+                recreateSwapChain();
+                return;
+            }
+            else
+            {
+                throw;
+            }
         }
 
         semaphoreIndex = (semaphoreIndex + 1) % presentCompleteSemaphores.size();
@@ -657,6 +716,8 @@ private:
 
     void cleanup()
     {
+        cleanUpSwapChain();
+
         glfwDestroyWindow(window);
         glfwTerminate();
     }
