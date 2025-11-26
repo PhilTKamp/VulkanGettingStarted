@@ -333,9 +333,9 @@ private:
 
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
-            {.features = {.samplerAnisotropy = true}}, // vk::PhysicalDeviceFeatures2
-            {.dynamicRendering = true},                // vk::PhysicalDeviceVulkan13Features
-            {.extendedDynamicState = true}             // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.features = {.samplerAnisotropy = true}},            // vk::PhysicalDeviceFeatures2
+            {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
+            {.extendedDynamicState = true}                        // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
         };
 
         // create a Device
