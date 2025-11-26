@@ -49,3 +49,8 @@ target_include_directories (${EXEC_TARGET} PRIVATE ${STB_INCLUDEDIR})
 
 add_slang_shader_target(shaders SOURCES ${SHADER_SLANG_SOURCES})
 add_dependencies(${EXEC_TARGET} shaders)
+
+set(TEXTURES_DIR_SOURCE "${CMAKE_SOURCE_DIR}/textures")
+set(TEXTURES_DIR_DEST "${CMAKE_CURRENT_BINARY_DIR}/")
+
+file(COPY ${TEXTURES_DIR_SOURCE} DESTINATION ${TEXTURES_DIR_DEST})
