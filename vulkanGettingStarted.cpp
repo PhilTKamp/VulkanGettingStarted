@@ -134,6 +134,8 @@ private:
 
     vk::raii::Image textureImage = nullptr;
     vk::raii::DeviceMemory textureImageMemory = nullptr;
+    vk::raii::ImageView textureImageView = nullptr;
+    vk::raii::Sampler textureSampler = nullptr;
 
     bool frameBufferResized = false;
 
@@ -167,6 +169,8 @@ private:
         createGraphicsPipeline();
         createCommandPool();
         createTextureImage();
+        createTextureImageView();
+        createTextureSampler();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -178,15 +182,57 @@ private:
 
     void createImageViews()
     {
-        swapChainImageViews.clear();
+        assert(swapChainImageViews.empty());
 
-        vk::ImageViewCreateInfo imageViewCreateInfo{.viewType = vk::ImageViewType::e2D, .format = swapChainSurfaceFormat.format, .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+        vk::ImageViewCreateInfo imageViewCreateInfo{
+            .viewType = vk::ImageViewType::e2D,
+            .format = swapChainSurfaceFormat.format,
+            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
 
         for (auto image : swapChainImages)
         {
             imageViewCreateInfo.image = image;
             swapChainImageViews.emplace_back(device, imageViewCreateInfo);
         }
+    }
+
+    void createTextureImageView()
+    {
+        textureImageView = createImageView(textureImage, vk::Format::eR8G8B8A8Srgb);
+    }
+
+    vk::raii::ImageView createImageView(vk::raii::Image &image, vk::Format format)
+    {
+        vk::ImageViewCreateInfo viewInfo{
+            .image = image,
+            .viewType = vk::ImageViewType::e2D,
+            .format = format,
+            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+
+        return vk::raii::ImageView(device, viewInfo);
+    }
+
+    void createTextureSampler()
+    {
+        vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
+
+        vk::SamplerCreateInfo samplerInfo{
+            .magFilter = vk::Filter::eLinear,
+            .minFilter = vk::Filter::eLinear,
+            .mipmapMode = vk::SamplerMipmapMode::eLinear,
+            .addressModeU = vk::SamplerAddressMode::eRepeat,
+            .addressModeV = vk::SamplerAddressMode::eRepeat,
+            .addressModeW = vk::SamplerAddressMode::eRepeat,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = vk::True,
+            .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+            .compareEnable = vk::False,
+            .compareOp = vk::CompareOp::eAlways,
+            .borderColor = vk::BorderColor::eIntOpaqueBlack,
+            .unnormalizedCoordinates = vk::False,
+        };
+
+        textureSampler = vk::raii::Sampler(device, samplerInfo);
     }
 
     void createDescriptorSetLayout()
@@ -287,9 +333,9 @@ private:
 
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
-            {},                            // vk::PhysicalDeviceFeatures2
-            {.dynamicRendering = true},    // vk::PhysicalDeviceVulkan13Features
-            {.extendedDynamicState = true} // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.features = {.samplerAnisotropy = true}}, // vk::PhysicalDeviceFeatures2
+            {.dynamicRendering = true},                // vk::PhysicalDeviceVulkan13Features
+            {.extendedDynamicState = true}             // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
         };
 
         // create a Device
@@ -456,19 +502,6 @@ private:
         return static_cast<uint32_t>(std::distance(queueFamilyProperties.begin(), graphicsQueueFamilyProperty));
     }
 
-    bool isDeviceSuitable(vk::raii::PhysicalDevice physicalDevice)
-    {
-        auto deviceProperties = physicalDevice.getProperties();
-        auto deviceFeatures = physicalDevice.getFeatures();
-
-        if (deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu && deviceFeatures.geometryShader)
-        {
-            return true;
-        }
-
-        return false;
-    }
-
     void setupDebugMessenger()
     {
         if (!enableValidationLayers)
@@ -565,9 +598,7 @@ private:
 
         stbi_image_free(pixels);
 
-        vk::raii::Image textureImageTemp({});
-        vk::raii::DeviceMemory textureImageMemoryTemp({});
-        createImage(texWidth, texHeight, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlagBits::eDeviceLocal, textureImageTemp, textureImageMemoryTemp);
+        createImage(texWidth, texHeight, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlagBits::eDeviceLocal, textureImage, textureImageMemory);
 
         transitionImageLayout(textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
         copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
