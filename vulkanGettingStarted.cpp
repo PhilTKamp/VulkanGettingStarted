@@ -12,6 +12,8 @@ import vulkan_hpp;
 #include <cstdlib>
 #include <map>
 #include <unordered_map>
+#include <random>
+#include <numbers>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -30,6 +32,7 @@ import vulkan_hpp;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t PARTICLE_COUNT = 2000;
 const std::string MODEL_PATH = "models/viking_room.obj";
 const std::string TEXTURE_PATH = "textures/viking_room.png";
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
@@ -91,6 +94,13 @@ struct UniformBufferObject
     glm::mat4 proj;
 };
 
+struct Particle
+{
+    glm::vec2 position;
+    glm::vec2 velocity;
+    glm::vec4 color;
+};
+
 class HelloTriangleApplication
 {
 public:
@@ -111,7 +121,7 @@ private:
     vk::raii::PhysicalDevice physicalDevice = nullptr;
     vk::raii::Device device = nullptr;
 
-    vk::raii::Queue queue = nullptr;
+    std::unique_ptr<vk::raii::Queue> queue = nullptr;
 
     vk::raii::SurfaceKHR surface = nullptr;
 
@@ -151,6 +161,9 @@ private:
     std::vector<vk::raii::Buffer> uniformBuffers;
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
     std::vector<void *> uniformBuffersMapped;
+
+    std::vector<vk::raii::Buffer> shaderStorageBuffers;
+    std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
     std::vector<vk::raii::DescriptorSet> descriptorSets;
@@ -215,6 +228,51 @@ private:
         createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
+    }
+
+    void createShaderStorageBuffers()
+    {
+        shaderStorageBuffers.clear();
+        shaderStorageBuffersMemory.clear();
+
+        std::default_random_engine rndEngine((unsigned)time(nullptr));
+        std::uniform_real_distribution<float> rndDist(0.0f, 1.0f);
+
+        // Create an initial set of particles (we could likely just as easily read this from a stream)
+        std::vector<Particle> particles(PARTICLE_COUNT);
+        for (auto &particle : particles)
+        {
+            float r = 0.25f * sqrtf(rndDist(rndEngine));
+            float theta = rndDist(rndEngine) * 2.0f * M_PI;
+            float x = r * cosf(theta) * HEIGHT / WIDTH;
+            float y = r * sinf(theta);
+            particle.position = glm::vec2(x, y);
+            particle.velocity = normalize(glm::vec2(x, y)) * 0.00025f;
+            particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+        }
+
+        vk::DeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+
+        // Create our staging buffer, used to transfer the particles to the GPU
+        vk::raii::Buffer stagingBuffer({});
+        vk::raii::DeviceMemory stagingBufferMemory({});
+        createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
+
+        void *dataStaging = stagingBufferMemory.mapMemory(0, bufferSize);
+        memcpy(dataStaging, particles.data(), (size_t)bufferSize);
+        stagingBufferMemory.unmapMemory();
+
+        // Create and initialize all of our Particle buffers that will remain on the GPU, non-host visible or coherent
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            // Copy initial particle data to all storage buffers
+            vk::raii::Buffer shaderStorageBufferTemp({});
+            vk::raii::DeviceMemory shaderStorageBufferMemoryTemp({});
+            createBuffer(bufferSize, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal, shaderStorageBufferTemp, shaderStorageBufferMemoryTemp);
+            copyBuffer(stagingBuffer, shaderStorageBufferTemp, bufferSize);
+            shaderStorageBuffers.emplace_back(std::move(shaderStorageBufferTemp));
+            shaderStorageBuffersMemory.emplace_back(std::move(shaderStorageBufferMemoryTemp));
+        }
     }
 
     void createImageViews()
@@ -385,6 +443,7 @@ private:
         for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
         {
             if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
+                (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eCompute) &&
                 physicalDevice.getSurfaceSupportKHR(qfpIndex, *surface))
             {
                 // found a queue family that supports both graphics and present
@@ -414,7 +473,7 @@ private:
                                               .ppEnabledExtensionNames = requiredDeviceExtension.data()};
 
         device = vk::raii::Device(physicalDevice, deviceCreateInfo);
-        queue = vk::raii::Queue(device, queueIndex, 0);
+        queue = std::make_unique<vk::raii::Queue>(device, queueIndex, 0);
     }
 
     void pickPhysicalDevice()
@@ -901,8 +960,8 @@ private:
         vk::SubmitInfo submitInfo{
             .commandBufferCount = 1,
             .pCommandBuffers = &*commandBuffer};
-        queue.submit(submitInfo, nullptr);
-        queue.waitIdle();
+        queue->submit(submitInfo, nullptr);
+        queue->waitIdle();
     }
 
     void loadModel()
@@ -1238,7 +1297,7 @@ private:
             .signalSemaphoreCount = 1,
             .pSignalSemaphores = &*renderFinishedSemaphores[imageIndex]};
 
-        queue.submit(submitInfo, *inFlightFences[currentFrame]);
+        queue->submit(submitInfo, *inFlightFences[currentFrame]);
 
         try
         {
@@ -1249,7 +1308,7 @@ private:
                 .pSwapchains = &*swapChain,
                 .pImageIndices = &imageIndex};
 
-            result = queue.presentKHR(presentInfoKHR);
+            result = queue->presentKHR(presentInfoKHR);
 
             if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || frameBufferResized)
             {
