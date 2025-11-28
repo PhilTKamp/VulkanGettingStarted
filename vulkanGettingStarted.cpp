@@ -949,7 +949,6 @@ private:
             .cullMode = vk::CullModeFlagBits::eBack,
             .frontFace = vk::FrontFace::eCounterClockwise,
             .depthBiasEnable = vk::False,
-            .depthBiasSlopeFactor = 1.0f, // CHECK: This may need to be removed
             .lineWidth = 1.0f,
         };
 
