@@ -96,9 +96,9 @@ private:
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr;
 
-    std::unique_ptr<vk::raii::DescriptorSetLayout> computeDescriptorSetLayout = nullptr;
-    vk::raii::PipelineLayout computePipelineLayout = nullptr;
-    vk::raii::Pipeline computePipeline = nullptr;
+    vk::raii::DescriptorSetLayout computeDescriptorSetLayout = nullptr;
+    std::unique_ptr<vk::raii::PipelineLayout> computePipelineLayout = nullptr;
+    std::unique_ptr<vk::raii::Pipeline> computePipeline = nullptr;
 
     vk::raii::CommandPool commandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
@@ -231,7 +231,7 @@ private:
             .pBindings = bindings.data(),
         };
 
-        computeDescriptorSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(device, layoutInfo);
+        computeDescriptorSetLayout = vk::raii::DescriptorSetLayout(device, layoutInfo);
     }
 
     void createComputeDescriptorSets()
@@ -312,6 +312,26 @@ private:
     void createComputePipeline()
     {
         vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
+
+        vk::PipelineShaderStageCreateInfo computeShaderStageInfo{
+            .stage = vk::ShaderStageFlagBits::eCompute,
+            .module = shaderModule,
+            .pName = "compMain",
+        };
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
+            .setLayoutCount = 1,
+            .pSetLayouts = &*computeDescriptorSetLayout,
+        };
+
+        computePipelineLayout = std::make_unique<vk::raii::PipelineLayout>(device, pipelineLayoutInfo);
+
+        vk::ComputePipelineCreateInfo pipelineInfo{
+            .stage = computeShaderStageInfo,
+            .layout = *computePipelineLayout,
+        };
+
+        computePipeline = std::make_unique<vk::raii::Pipeline>(device.createComputePipeline(nullptr, pipelineInfo));
     }
 
     void createLogicalDevice()
