@@ -382,6 +382,11 @@ private:
         computeDescriptorSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(device, layoutInfo);
     }
 
+    void createComputePipeline()
+    {
+        vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
+    }
+
     void createGraphicsPipeline()
     {
         vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
