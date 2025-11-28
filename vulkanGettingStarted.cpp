@@ -54,6 +54,19 @@ struct Particle
     glm::vec2 position;
     glm::vec2 velocity;
     glm::vec4 color;
+
+    static vk::VertexInputBindingDescription getBindingDescription()
+    {
+        return {0, sizeof(Particle), vk::VertexInputRate::eVertex};
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions()
+    {
+        return {
+            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32Sfloat, offsetof(Particle, position)),
+            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color)),
+        };
+    }
 };
 
 class HelloTriangleApplication
@@ -97,8 +110,8 @@ private:
     vk::raii::Pipeline graphicsPipeline = nullptr;
 
     vk::raii::DescriptorSetLayout computeDescriptorSetLayout = nullptr;
-    std::unique_ptr<vk::raii::PipelineLayout> computePipelineLayout = nullptr;
-    std::unique_ptr<vk::raii::Pipeline> computePipeline = nullptr;
+    vk::raii::PipelineLayout computePipelineLayout = nullptr;
+    vk::raii::Pipeline computePipeline = nullptr;
 
     vk::raii::CommandPool commandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
@@ -280,15 +293,15 @@ private:
                 },
                 vk::WriteDescriptorSet{
                     .dstSet = computeDescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 1,
+                    .dstBinding = 1,
+                    .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eStorageBuffer,
                     .pBufferInfo = &storageBufferInfoLastFrame},
                 vk::WriteDescriptorSet{
                     .dstSet = computeDescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 1,
+                    .dstBinding = 2,
+                    .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eStorageBuffer,
                     .pBufferInfo = &storageBufferInfoCurrentFrame,
@@ -329,14 +342,14 @@ private:
             .pSetLayouts = &*computeDescriptorSetLayout,
         };
 
-        computePipelineLayout = std::make_unique<vk::raii::PipelineLayout>(device, pipelineLayoutInfo);
+        computePipelineLayout = vk::raii::PipelineLayout(device, pipelineLayoutInfo);
 
         vk::ComputePipelineCreateInfo pipelineInfo{
             .stage = computeShaderStageInfo,
             .layout = *computePipelineLayout,
         };
 
-        computePipeline = std::make_unique<vk::raii::Pipeline>(device.createComputePipeline(nullptr, pipelineInfo));
+        computePipeline = vk::raii::Pipeline(device, nullptr, pipelineInfo);
     }
 
     void createLogicalDevice()
@@ -738,6 +751,7 @@ private:
 
     void recordCommandBuffer(uint32_t imageIndex)
     {
+        commandBuffers[currentFrame].reset();
         commandBuffers[currentFrame].begin({});
 
         transition_image_layout(
@@ -769,11 +783,11 @@ private:
         };
 
         commandBuffers[currentFrame].beginRendering(renderingInfo);
-
         commandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline);
-
+        commandBuffers[currentFrame].bindVertexBuffers(0, {*shaderStorageBuffers[currentFrame]}, {0});
         commandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
         commandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
+        commandBuffers[currentFrame].draw(PARTICLE_COUNT, 1, 0, 0);
         commandBuffers[currentFrame].endRendering();
 
         transition_image_layout(
@@ -794,8 +808,9 @@ private:
 
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, nullptr, *inFlightFences[currentFrame]);
         while (vk::Result::eTimeout == device.waitForFences(*inFlightFences[currentFrame], vk::True, UINT64_MAX))
+            ;
 
-            device.resetFences(*inFlightFences[currentFrame]);
+        device.resetFences(*inFlightFences[currentFrame]);
 
         uint64_t computeWaitValue = timelineValue;
         uint64_t computeSignalValue = ++timelineValue;
@@ -890,30 +905,87 @@ private:
     {
         vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
 
-        vk::PipelineShaderStageCreateInfo vertShaderStageInfo{.stage = vk::ShaderStageFlagBits::eVertex, .module = shaderModule, .pName = "vertMain"};
-        vk::PipelineShaderStageCreateInfo fragShaderStageInfo{.stage = vk::ShaderStageFlagBits::eFragment, .module = shaderModule, .pName = "fragMain"};
-        vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+        vk::PipelineShaderStageCreateInfo vertShaderStageInfo{
+            .stage = vk::ShaderStageFlagBits::eVertex,
+            .module = shaderModule,
+            .pName = "vertMain",
+        };
+        vk::PipelineShaderStageCreateInfo fragShaderStageInfo{
+            .stage = vk::ShaderStageFlagBits::eFragment,
+            .module = shaderModule,
+            .pName = "fragMain",
+        };
 
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
-        vk::PipelineInputAssemblyStateCreateInfo inputAssembly{.topology = vk::PrimitiveTopology::eTriangleList};
-        vk::PipelineViewportStateCreateInfo viewportState{.viewportCount = 1, .scissorCount = 1};
+        vk::PipelineShaderStageCreateInfo shaderStages[] = {
+            vertShaderStageInfo,
+            fragShaderStageInfo,
+        };
 
-        vk::PipelineRasterizationStateCreateInfo rasterizer{.depthClampEnable = vk::False, .rasterizerDiscardEnable = vk::False, .polygonMode = vk::PolygonMode::eFill, .cullMode = vk::CullModeFlagBits::eBack, .frontFace = vk::FrontFace::eClockwise, .depthBiasEnable = vk::False, .depthBiasSlopeFactor = 1.0f, .lineWidth = 1.0f};
+        auto bindingDescription = Particle::getBindingDescription();
+        auto attributeDescriptions = Particle::getAttributeDescriptions();
 
-        vk::PipelineMultisampleStateCreateInfo multisampling{.rasterizationSamples = vk::SampleCountFlagBits::e1, .sampleShadingEnable = vk::False};
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &bindingDescription,
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
+            .pVertexAttributeDescriptions = attributeDescriptions.data(),
+        };
 
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment{.blendEnable = vk::False,
-                                                                   .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA};
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
+            .topology = vk::PrimitiveTopology::ePointList, // NOTE: We're not rendering verts, just points.
+            .primitiveRestartEnable = vk::False,
+        };
 
-        vk::PipelineColorBlendStateCreateInfo colorBlending{.logicOpEnable = vk::False, .logicOp = vk::LogicOp::eCopy, .attachmentCount = 1, .pAttachments = &colorBlendAttachment};
+        vk::PipelineViewportStateCreateInfo viewportState{
+            .viewportCount = 1,
+            .scissorCount = 1,
+        };
+
+        vk::PipelineRasterizationStateCreateInfo rasterizer{
+            .depthClampEnable = vk::False,
+            .rasterizerDiscardEnable = vk::False,
+            .polygonMode = vk::PolygonMode::eFill,
+            .cullMode = vk::CullModeFlagBits::eBack,
+            .frontFace = vk::FrontFace::eCounterClockwise,
+            .depthBiasEnable = vk::False,
+            .depthBiasSlopeFactor = 1.0f, // CHECK: This may need to be removed
+            .lineWidth = 1.0f,
+        };
+
+        vk::PipelineMultisampleStateCreateInfo multisampling{
+            .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            .sampleShadingEnable = vk::False,
+        };
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment{
+            .blendEnable = vk::True,
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp = vk::BlendOp::eAdd,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        };
+
+        vk::PipelineColorBlendStateCreateInfo colorBlending{
+            .logicOpEnable = vk::False,
+            .logicOp = vk::LogicOp::eCopy,
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment,
+        };
 
         std::vector dynamicStates = {
             vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor};
-        vk::PipelineDynamicStateCreateInfo dynamicState{.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data()};
+            vk::DynamicState::eScissor,
+        };
 
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{.setLayoutCount = 0, .pushConstantRangeCount = 0};
+        vk::PipelineDynamicStateCreateInfo dynamicState{
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data(),
+        };
 
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
         pipelineLayout = vk::raii::PipelineLayout(device, pipelineLayoutInfo);
 
         vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipelineCreateInfoChain = {
@@ -942,8 +1014,6 @@ private:
 
     void createSyncObjects()
     {
-        presentCompleteSemaphores.clear();
-        renderFinishedSemaphores.clear();
         inFlightFences.clear();
 
         vk::SemaphoreTypeCreateInfo semaphoreType{
@@ -953,17 +1023,10 @@ private:
         semaphore = vk::raii::Semaphore(device, {.pNext = &semaphoreType});
         timelineValue = 0;
 
-        for (size_t i = 0; i < swapChainImages.size(); i++)
-        {
-            presentCompleteSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
-            renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
-        }
-
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            inFlightFences.emplace_back(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled});
-            computeFinishedSemaphores.emplace_back(std::make_unique<vk::raii::Semaphore>(device, vk::SemaphoreCreateInfo()));
-            computeInFlightFences.emplace_back(std::make_unique<vk::raii::Fence>(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled}));
+            vk::FenceCreateInfo fenceInfo{};
+            inFlightFences.emplace_back(device, fenceInfo);
         }
     }
 
