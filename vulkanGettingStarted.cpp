@@ -94,6 +94,11 @@ struct UniformBufferObject
     glm::mat4 proj;
 };
 
+struct ComputeUniformBufferObject
+{
+    float deltaTime = 1.0f;
+};
+
 struct Particle
 {
     glm::vec2 position;
@@ -137,6 +142,9 @@ private:
 
     std::vector<vk::raii::Buffer> shaderStorageBuffers;
     std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
+    std::vector<vk::raii::Buffer> computeUniformBuffers;
+    std::vector<vk::raii::DeviceMemory> computeUniformBuffersMemory;
+    std::vector<void *> computeUniformBuffersMapped;
 
     std::vector<vk::raii::Buffer> uniformBuffers;
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
@@ -1086,11 +1094,31 @@ private:
         }
     }
 
+    void createComputeUniformBuffers()
+    {
+        computeUniformBuffers.clear();
+        computeUniformBuffersMemory.clear();
+        computeUniformBuffersMapped.clear();
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vk::DeviceSize bufferSize = sizeof(ComputeUniformBufferObject);
+            vk::raii::Buffer buffer({});
+            vk::raii::DeviceMemory bufferMem({});
+            createBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, buffer, bufferMem);
+            computeUniformBuffers.emplace_back(std::move(buffer));
+            computeUniformBuffersMemory.emplace_back(std::move(bufferMem));
+            computeUniformBuffersMapped.emplace_back(uniformBuffersMemory[i].mapMemory(0, bufferSize));
+        }
+    }
+
     void createDescriptorPool()
     {
         std::array poolSize{
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)};
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * 2),
+            vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2),
+            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT),
+        };
 
         vk::DescriptorPoolCreateInfo poolInfo{
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
@@ -1115,28 +1143,74 @@ private:
             vk::DescriptorBufferInfo bufferInfo{
                 .buffer = uniformBuffers[i],
                 .offset = 0,
-                .range = sizeof(UniformBufferObject)};
+                .range = sizeof(UniformBufferObject),
+            };
+
+            vk::DescriptorBufferInfo computeBufferInfo{
+                .buffer = computeUniformBuffers[i],
+                .offset = 0,
+                .range = sizeof(ComputeUniformBufferObject),
+            };
+
+            vk::DescriptorBufferInfo storageBufferInfoLastFrame{
+                .buffer = shaderStorageBuffers[(i - 1) % MAX_FRAMES_IN_FLIGHT],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT,
+            };
+
+            vk::DescriptorBufferInfo storageBufferInfoCurrentFrame{
+                .buffer = shaderStorageBuffers[i],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT,
+            };
 
             vk::DescriptorImageInfo imageInfo{
                 .sampler = textureSampler,
                 .imageView = textureImageView,
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
 
             std::array descriptorWrites{
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .pBufferInfo = &computeBufferInfo,
+                },
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 1,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &storageBufferInfoLastFrame},
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 1,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &storageBufferInfoCurrentFrame,
+                },
                 vk::WriteDescriptorSet{
                     .dstSet = descriptorSets[i],
                     .dstBinding = 0,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &bufferInfo},
+                    .pBufferInfo = &bufferInfo,
+                },
                 vk::WriteDescriptorSet{
                     .dstSet = descriptorSets[i],
                     .dstBinding = 1,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                    .pImageInfo = &imageInfo}};
+                    .pImageInfo = &imageInfo,
+                },
+            };
 
             device.updateDescriptorSets(descriptorWrites, {});
         }
