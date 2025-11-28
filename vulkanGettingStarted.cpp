@@ -765,7 +765,6 @@ private:
             vk::ImageAspectFlagBits::eColor);
 
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
-        vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
 
         vk::RenderingAttachmentInfo attachmentInfo = {
             .imageView = swapChainImageViews[imageIndex],
