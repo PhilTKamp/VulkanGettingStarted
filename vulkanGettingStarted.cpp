@@ -701,6 +701,7 @@ private:
 
     void recordComputeCommandBuffer()
     {
+        computeCommandBuffers[currentFrame].reset();
         computeCommandBuffers[currentFrame].begin({});
         computeCommandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eCompute, *computePipeline);
         computeCommandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eCompute, *computePipelineLayout, 0, {computeDescriptorSets[currentFrame]}, {});
