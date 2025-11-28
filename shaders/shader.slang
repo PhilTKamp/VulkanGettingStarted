@@ -1,15 +1,41 @@
 struct VSInput
 {
-    float3 inPosition;
-    float3 inColor;
-    float2 inTexCoord;
+    float2 inPosition;
+    float4 inColor;
+};
+
+struct VSOutput
+{
+    float4 pos : SV_Position;
+    float pointSize : SV_PointSize;
+    float3 fragColor : COLOR0;
+};
+
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float3 fragColor : COLOR0;
+    float2 pointCoord : SV_PointCoord;
+};
+
+[shader("vertex")]
+VSOutput vertMain(VSInput input)
+{
+    VSOutput output;
+    output.pointSize = 14.0;
+    output.pos = float4(input.inPosition, 1.0, 1.0);
+    output.fragColor = input.inColor.rgb;
+    // output.pointCoord = (input.inPosition * float2(1.0, -1.0) + float2(1.0)) / 2.0;
+    return output;
 }
 
-struct UniformBuffer
+[shader("fragment")]
+float4 fragMain(PSInput input)
+    : SV_TARGET
 {
-    float deltaTime;
+    float2 coord = input.pointCoord - float2(0.5);
+    return float4(input.fragColor, 0.5 - length(coord));
 }
-ConstantBuffer<UniformBuffer> ubo;
 
 struct Particle
 {
@@ -18,20 +44,18 @@ struct Particle
     float4 color;
 };
 
+struct UniformBuffer
+{
+    float deltaTime;
+};
+ConstantBuffer<UniformBuffer> ubo;
+
 struct ParticleSSBO
 {
     Particle particles;
 };
-
 StructuredBuffer<ParticleSSBO> particlesIn;
 RWStructuredBuffer<ParticleSSBO> particlesOut;
-
-struct VSOutput
-{
-    float4 pos : SV_Position;
-    float3 color;
-    float2 fragTexCoord;
-}
 
 [shader("compute")]
 [numthreads(256, 1, 1)]
@@ -51,23 +75,4 @@ void compMain(uint3 threadId: SV_DispatchThreadID)
     {
         particlesOut[index].particles.velocity.y = -particlesOut[index].particles.velocity.y;
     }
-}
-
-[shader("vertex")]
-VSOutput vertMain(VSInput input)
-{
-    VSOutput output;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.inPosition, 1.0))));
-    output.color = input.inColor;
-    output.fragTexCoord = input.inTexCoord;
-    return output;
-}
-
-Sampler2D texture;
-
-[shader("fragment")]
-float4 fragMain(VSOutput vertIn)
-    : SV_Target
-{
-    return texture.Sample(vertIn.fragTexCoord);
 }
