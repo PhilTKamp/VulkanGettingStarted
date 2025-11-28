@@ -597,23 +597,6 @@ private:
         commandPool = vk::raii::CommandPool(device, poolInfo);
     }
 
-    void copyBufferToImage(const vk::raii::Buffer &buffer, vk::raii::Image &image, uint32_t width, uint32_t height)
-    {
-        auto commandBuffer = beginSingleTimeCommands();
-
-        vk::BufferImageCopy region{
-            .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {width, height, 1}};
-
-        commandBuffer->copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, {region});
-
-        endSingleTimeCommands(*commandBuffer);
-    }
-
     std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands()
     {
         vk::CommandBufferAllocateInfo allocInfo{
