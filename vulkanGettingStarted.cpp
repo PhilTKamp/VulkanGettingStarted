@@ -102,6 +102,7 @@ private:
 
     vk::raii::CommandPool commandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
+    std::vector<vk::raii::CommandBuffer> computeCommandBuffers;
 
     std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
     std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
@@ -706,6 +707,19 @@ private:
         vk::CommandBufferAllocateInfo allocInfo{.commandPool = commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = MAX_FRAMES_IN_FLIGHT};
 
         commandBuffers = vk::raii::CommandBuffers(device, allocInfo);
+    }
+
+    void createComputeCommandBuffers()
+    {
+        computeCommandBuffers.clear();
+
+        vk::CommandBufferAllocateInfo allocInfo{
+            .commandPool = commandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+        };
+
+        computeCommandBuffers = vk::raii::CommandBuffers(device, allocInfo);
     }
 
     void recordCommandBuffer(uint32_t imageIndex)
