@@ -104,11 +104,14 @@ private:
     std::vector<vk::raii::CommandBuffer> commandBuffers;
     std::vector<vk::raii::CommandBuffer> computeCommandBuffers;
 
-    std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
-    std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
+    vk::raii::Semaphore semaphore = nullptr;
+    uint64_t timelineValue = 0;
     std::vector<vk::raii::Fence> inFlightFences;
-    uint32_t semaphoreIndex = 0;
     uint32_t currentFrame = 0;
+
+    double lastFrameTime = 0.0f;
+
+    double lastTime = 0.0f;
 
     std::vector<const char *> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName,
@@ -144,6 +147,7 @@ private:
         createDescriptorPool();
         createComputeDescriptorSets();
         createCommandBuffers();
+        createComputeCommandBuffers();
         createSyncObjects();
     }
 
@@ -357,10 +361,11 @@ private:
         }
 
         // query for Vulkan 1.3 features
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR> featureChain = {
             {.features = {.samplerAnisotropy = true}},            // vk::PhysicalDeviceFeatures2
             {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
-            {.extendedDynamicState = true}                        // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.extendedDynamicState = true},                       // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.timelineSemaphore = true},                          // vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR
         };
 
         // create a Device
@@ -722,6 +727,15 @@ private:
         computeCommandBuffers = vk::raii::CommandBuffers(device, allocInfo);
     }
 
+    void recordComputeCommandBuffer()
+    {
+        computeCommandBuffers[currentFrame].begin({});
+        computeCommandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eCompute, *computePipeline);
+        computeCommandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eCompute, *computePipelineLayout, 0, {computeDescriptorSets[currentFrame]}, {});
+        computeCommandBuffers[currentFrame].dispatch(PARTICLE_COUNT / 256, 1, 1);
+        computeCommandBuffers[currentFrame].end();
+    }
+
     void recordCommandBuffer(uint32_t imageIndex)
     {
         commandBuffers[currentFrame].begin({});
@@ -777,51 +791,99 @@ private:
 
     void drawFrame()
     {
+
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, nullptr, *inFlightFences[currentFrame]);
         while (vk::Result::eTimeout == device.waitForFences(*inFlightFences[currentFrame], vk::True, UINT64_MAX))
-            ;
 
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphores[semaphoreIndex], nullptr);
+            device.resetFences(*inFlightFences[currentFrame]);
 
-        device.resetFences(*inFlightFences[currentFrame]);
-        commandBuffers[currentFrame].reset();
-        recordCommandBuffer(imageIndex);
+        uint64_t computeWaitValue = timelineValue;
+        uint64_t computeSignalValue = ++timelineValue;
+        uint64_t graphicsWaitValue = computeSignalValue;
+        uint64_t graphicsSignalValue = ++timelineValue;
 
-        vk::PipelineStageFlags waitDestinationStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-        const vk::SubmitInfo submitInfo{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*presentCompleteSemaphores[semaphoreIndex],
-            .pWaitDstStageMask = &waitDestinationStageMask,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &*commandBuffers[currentFrame],
-            .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &*renderFinishedSemaphores[imageIndex],
-        };
+        updateUniformBuffer(currentFrame);
 
-        queue->submit(submitInfo, *inFlightFences[currentFrame]);
-
-        const vk::PresentInfoKHR presentInfoKHR{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*renderFinishedSemaphores[imageIndex],
-            .swapchainCount = 1,
-            .pSwapchains = &*swapChain,
-            .pImageIndices = &imageIndex,
-        };
-
-        result = queue->presentKHR(presentInfoKHR);
-
-        switch (result)
         {
-        case vk::Result::eSuccess:
-            break;
-        case vk::Result::eSuboptimalKHR:
-            std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR ! \n";
-            break;
-        default:
-            break;
-        }
+            recordComputeCommandBuffer();
 
-        semaphoreIndex = (semaphoreIndex + 1) % presentCompleteSemaphores.size();
-        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+            vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
+                .waitSemaphoreValueCount = 1,
+                .pWaitSemaphoreValues = &computeWaitValue,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues = &computeSignalValue,
+            };
+
+            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eComputeShader};
+
+            vk::SubmitInfo computeSubmitInfo{
+                .pNext = &computeTimelineInfo,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*semaphore,
+                .pWaitDstStageMask = waitStages,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &*computeCommandBuffers[currentFrame],
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &*semaphore,
+            };
+
+            queue->submit(computeSubmitInfo, nullptr);
+        }
+        {
+            recordCommandBuffer(imageIndex);
+
+            vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eVertexInput;
+            vk::TimelineSemaphoreSubmitInfo graphicsTimelineInfo{
+                .waitSemaphoreValueCount = 1,
+                .pWaitSemaphoreValues = &graphicsWaitValue,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues = &graphicsSignalValue,
+            };
+
+            vk::SubmitInfo graphicsSubmitInfo{
+                .pNext = &graphicsTimelineInfo,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*semaphore,
+                .pWaitDstStageMask = &waitStage,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &*commandBuffers[currentFrame],
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &*semaphore,
+            };
+
+            queue->submit(graphicsSubmitInfo, nullptr);
+
+            vk::SemaphoreWaitInfo waitInfo{
+                .semaphoreCount = 1,
+                .pSemaphores = &*semaphore,
+                .pValues = &graphicsSignalValue,
+            };
+
+            while (vk::Result::eTimeout == device.waitSemaphores(waitInfo, UINT64_MAX))
+                ;
+
+            vk::PresentInfoKHR presentInfo{
+                .waitSemaphoreCount = 0, // Q: No binary semaphores needed. Is this better, why?
+                .pWaitSemaphores = nullptr,
+                .swapchainCount = 1,
+                .pSwapchains = &*swapChain,
+                .pImageIndices = &imageIndex,
+            };
+
+            result = queue->presentKHR(presentInfo);
+            switch (result)
+            {
+            case vk::Result::eSuccess:
+                break;
+            case vk::Result::eSuboptimalKHR:
+                std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR!\n";
+                break;
+            default:
+                break;
+            }
+
+            currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        }
     }
 
     void createGraphicsPipeline()
@@ -871,11 +933,25 @@ private:
         graphicsPipeline = vk::raii::Pipeline(device, nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
     }
 
+    void updateUniformBuffer(uint32_t currentImage)
+    {
+        UniformBufferObject ubo{};
+        ubo.deltaTime = static_cast<float>(lastFrameTime) * 2.0f;
+        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    }
+
     void createSyncObjects()
     {
         presentCompleteSemaphores.clear();
         renderFinishedSemaphores.clear();
         inFlightFences.clear();
+
+        vk::SemaphoreTypeCreateInfo semaphoreType{
+            .semaphoreType = vk::SemaphoreType::eTimeline,
+            .initialValue = 0,
+        };
+        semaphore = vk::raii::Semaphore(device, {.pNext = &semaphoreType});
+        timelineValue = 0;
 
         for (size_t i = 0; i < swapChainImages.size(); i++)
         {
@@ -886,6 +962,8 @@ private:
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             inFlightFences.emplace_back(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled});
+            computeFinishedSemaphores.emplace_back(std::make_unique<vk::raii::Semaphore>(device, vk::SemaphoreCreateInfo()));
+            computeInFlightFences.emplace_back(std::make_unique<vk::raii::Fence>(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled}));
         }
     }
 
@@ -987,6 +1065,9 @@ private:
         {
             glfwPollEvents();
             drawFrame();
+            double currentTime = glfwGetTime();
+            lastFrameTime = (currentTime - lastTime) * 1000.0;
+            lastTime = currentTime;
         }
 
         device.waitIdle();
