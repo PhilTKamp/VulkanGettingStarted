@@ -597,32 +597,6 @@ private:
         commandPool = vk::raii::CommandPool(device, poolInfo);
     }
 
-    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Image &image, vk::raii::DeviceMemory &imageMemory)
-    {
-        vk::ImageCreateInfo imageInfo{
-            .imageType = vk::ImageType::e2D,
-            .format = format,
-            .extent = {width, height, 1},
-            .mipLevels = mipLevels,
-            .arrayLayers = 1,
-            .samples = numSamples,
-            .tiling = tiling,
-            .usage = usage,
-            .sharingMode = vk::SharingMode::eExclusive,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        };
-
-        image = vk::raii::Image(device, imageInfo);
-
-        vk::MemoryRequirements memRequirements = image.getMemoryRequirements();
-        vk::MemoryAllocateInfo allocInfo{
-            .allocationSize = memRequirements.size,
-            .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)};
-
-        imageMemory = vk::raii::DeviceMemory(device, allocInfo);
-        image.bindMemory(imageMemory, 0);
-    }
-
     void copyBufferToImage(const vk::raii::Buffer &buffer, vk::raii::Image &image, uint32_t width, uint32_t height)
     {
         auto commandBuffer = beginSingleTimeCommands();
