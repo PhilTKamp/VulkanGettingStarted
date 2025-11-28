@@ -117,13 +117,48 @@ private:
     vk::raii::Context context;
     vk::raii::Instance instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
-
+    vk::raii::SurfaceKHR surface = nullptr;
     vk::raii::PhysicalDevice physicalDevice = nullptr;
     vk::raii::Device device = nullptr;
-
+    uint32_t queueIndex = ~0;
     std::unique_ptr<vk::raii::Queue> queue = nullptr;
+    vk::raii::SwapchainKHR swapChain = nullptr;
+    std::vector<vk::Image> swapChainImages;
+    vk::SurfaceFormatKHR swapChainSurfaceFormat;
+    vk::Extent2D swapChainExtent;
+    std::vector<vk::raii::ImageView> swapChainImageViews;
 
-    vk::raii::SurfaceKHR surface = nullptr;
+    vk::raii::PipelineLayout pipelineLayout = nullptr;
+    vk::raii::Pipeline graphicsPipeline = nullptr;
+
+    std::unique_ptr<vk::raii::DescriptorSetLayout> computeDescriptorSetLayout = nullptr;
+    vk::raii::PipelineLayout computePipelineLayout = nullptr;
+    vk::raii::Pipeline computePipeline = nullptr;
+
+    std::vector<vk::raii::Buffer> shaderStorageBuffers;
+    std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
+
+    std::vector<vk::raii::Buffer> uniformBuffers;
+    std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
+    std::vector<void *> uniformBuffersMapped;
+
+    vk::raii::DescriptorPool descriptorPool = nullptr;
+    std::vector<vk::raii::DescriptorSet> computeDescriptorSets;
+
+    vk::raii::CommandPool commandPool = nullptr;
+    std::vector<vk::raii::CommandBuffer> commandBuffers;
+    std::vector<vk::raii::CommandBuffer> computeCommandBuffers;
+
+    vk::raii::Semaphore semaphore = nullptr;
+    uint64_t timelineValue = 0;
+    std::vector<vk::raii::Fence> inFlightFences;
+    uint32_t currentFrame = 0;
+
+    double lastFrameTime = 0.0;
+
+    bool frameBufferResized = false;
+
+    double lastTime = 0.0f;
 
     std::vector<const char *> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName,
@@ -131,24 +166,12 @@ private:
         vk::KHRSynchronization2ExtensionName,
         vk::KHRCreateRenderpass2ExtensionName};
 
-    vk::SurfaceFormatKHR swapChainSurfaceFormat;
-    vk::Extent2D swapChainExtent;
-
-    vk::raii::SwapchainKHR swapChain = nullptr;
-    std::vector<vk::Image> swapChainImages;
-    std::vector<vk::raii::ImageView> swapChainImageViews;
+    // Everything beyond here is not within the Compute Shaders example
     vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
-    vk::raii::PipelineLayout pipelineLayout = nullptr;
-    vk::raii::Pipeline graphicsPipeline = nullptr;
-    vk::raii::CommandPool commandPool = nullptr;
-    std::vector<vk::raii::CommandBuffer> commandBuffers;
-    uint32_t queueIndex = ~0;
 
     std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
     std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
-    std::vector<vk::raii::Fence> inFlightFences;
 
-    uint32_t currentFrame = 0;
     uint32_t semaphoreIndex = 0;
 
     std::vector<Vertex> vertices;
@@ -158,14 +181,6 @@ private:
     vk::raii::Buffer indexBuffer = nullptr;
     vk::raii::DeviceMemory indexBufferMemory = nullptr;
 
-    std::vector<vk::raii::Buffer> uniformBuffers;
-    std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
-    std::vector<void *> uniformBuffersMapped;
-
-    std::vector<vk::raii::Buffer> shaderStorageBuffers;
-    std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
-
-    vk::raii::DescriptorPool descriptorPool = nullptr;
     std::vector<vk::raii::DescriptorSet> descriptorSets;
 
     uint32_t mipLevels = 0;
@@ -182,8 +197,6 @@ private:
     vk::raii::Image colorImage = nullptr;
     vk::raii::DeviceMemory colorImageMemory = nullptr;
     vk::raii::ImageView colorImageView = nullptr;
-
-    bool frameBufferResized = false;
 
     void initWindow()
     {
@@ -213,6 +226,7 @@ private:
         createSwapChain();
         createImageViews();
         createDescriptorSetLayout();
+        createComputeDescriptorSetLayout();
         createGraphicsPipeline();
         createCommandPool();
         createColorResources();
@@ -342,6 +356,22 @@ private:
             .pBindings = bindings.data()};
 
         descriptorSetLayout = vk::raii::DescriptorSetLayout(device, layoutInfo);
+    }
+
+    void createComputeDescriptorSetLayout()
+    {
+        std::array bindings = {
+            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+            vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+        };
+
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{
+            .bindingCount = static_cast<uint32_t>(bindings.size()),
+            .pBindings = bindings.data(),
+        };
+
+        computeDescriptorSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(device, layoutInfo);
     }
 
     void createGraphicsPipeline()
