@@ -743,9 +743,9 @@ private:
 
         commandBuffers[currentFrame].beginRendering(renderingInfo);
         commandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline);
-        commandBuffers[currentFrame].bindVertexBuffers(0, {*shaderStorageBuffers[currentFrame]}, {0});
         commandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
         commandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
+        commandBuffers[currentFrame].bindVertexBuffers(0, {*shaderStorageBuffers[currentFrame]}, {0});
         commandBuffers[currentFrame].draw(PARTICLE_COUNT, 1, 0, 0);
         commandBuffers[currentFrame].endRendering();
 
@@ -827,17 +827,19 @@ private:
 
             queue->submit(graphicsSubmitInfo, nullptr);
 
+            // Present the image (waiting for graphics to finish)
             vk::SemaphoreWaitInfo waitInfo{
                 .semaphoreCount = 1,
                 .pSemaphores = &*semaphore,
                 .pValues = &graphicsSignalValue,
             };
 
+            // Waiting for graphics to complete before presenting
             while (vk::Result::eTimeout == device.waitSemaphores(waitInfo, UINT64_MAX))
                 ;
 
             vk::PresentInfoKHR presentInfo{
-                .waitSemaphoreCount = 0, // Q: No binary semaphores needed. Is this better, why?
+                .waitSemaphoreCount = 0, // Q: No binary semaphores needed. Is this better? Why?
                 .pWaitSemaphores = nullptr,
                 .swapchainCount = 1,
                 .pSwapchains = &*swapChain,
