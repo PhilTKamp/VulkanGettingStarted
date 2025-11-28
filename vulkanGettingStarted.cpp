@@ -234,6 +234,81 @@ private:
         computeDescriptorSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(device, layoutInfo);
     }
 
+    void createComputeDescriptorSets()
+    {
+        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *computeDescriptorSetLayout);
+        vk::DescriptorSetAllocateInfo allocInfo{
+            .descriptorPool = descriptorPool,
+            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
+            .pSetLayouts = layouts.data()};
+
+        computeDescriptorSets = device.allocateDescriptorSets(allocInfo);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vk::DescriptorBufferInfo bufferInfo{
+                .buffer = uniformBuffers[i],
+                .offset = 0,
+                .range = sizeof(UniformBufferObject),
+            };
+
+            vk::DescriptorBufferInfo storageBufferInfoLastFrame{
+                .buffer = shaderStorageBuffers[(i - 1) % MAX_FRAMES_IN_FLIGHT],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT,
+            };
+
+            vk::DescriptorBufferInfo storageBufferInfoCurrentFrame{
+                .buffer = shaderStorageBuffers[i],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT,
+            };
+
+            std::array descriptorWrites{
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .pBufferInfo = &bufferInfo,
+                },
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 1,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &storageBufferInfoLastFrame},
+                vk::WriteDescriptorSet{
+                    .dstSet = computeDescriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 1,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &storageBufferInfoCurrentFrame,
+                },
+            };
+
+            device.updateDescriptorSets(descriptorWrites, {});
+        }
+    }
+
+    void createDescriptorPool()
+    {
+        std::array poolSize{
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
+            vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2),
+        };
+
+        vk::DescriptorPoolCreateInfo poolInfo{
+            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+            .maxSets = MAX_FRAMES_IN_FLIGHT,
+            .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
+            .pPoolSizes = poolSize.data()};
+        descriptorPool = vk::raii::DescriptorPool(device, poolInfo);
+    }
+
     void createComputePipeline()
     {
         vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
@@ -564,81 +639,6 @@ private:
             uniformBuffers.emplace_back(std::move(buffer));
             uniformBuffersMemory.emplace_back(std::move(bufferMem));
             uniformBuffersMapped.emplace_back(uniformBuffersMemory[i].mapMemory(0, bufferSize));
-        }
-    }
-
-    void createDescriptorPool()
-    {
-        std::array poolSize{
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2),
-        };
-
-        vk::DescriptorPoolCreateInfo poolInfo{
-            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = MAX_FRAMES_IN_FLIGHT,
-            .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
-            .pPoolSizes = poolSize.data()};
-        descriptorPool = vk::raii::DescriptorPool(device, poolInfo);
-    }
-
-    void createComputeDescriptorSets()
-    {
-        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *computeDescriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocInfo{
-            .descriptorPool = descriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data()};
-
-        computeDescriptorSets = device.allocateDescriptorSets(allocInfo);
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            vk::DescriptorBufferInfo bufferInfo{
-                .buffer = uniformBuffers[i],
-                .offset = 0,
-                .range = sizeof(UniformBufferObject),
-            };
-
-            vk::DescriptorBufferInfo storageBufferInfoLastFrame{
-                .buffer = shaderStorageBuffers[(i - 1) % MAX_FRAMES_IN_FLIGHT],
-                .offset = 0,
-                .range = sizeof(Particle) * PARTICLE_COUNT,
-            };
-
-            vk::DescriptorBufferInfo storageBufferInfoCurrentFrame{
-                .buffer = shaderStorageBuffers[i],
-                .offset = 0,
-                .range = sizeof(Particle) * PARTICLE_COUNT,
-            };
-
-            std::array descriptorWrites{
-                vk::WriteDescriptorSet{
-                    .dstSet = computeDescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &bufferInfo,
-                },
-                vk::WriteDescriptorSet{
-                    .dstSet = computeDescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 1,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eStorageBuffer,
-                    .pBufferInfo = &storageBufferInfoLastFrame},
-                vk::WriteDescriptorSet{
-                    .dstSet = computeDescriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 1,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eStorageBuffer,
-                    .pBufferInfo = &storageBufferInfoCurrentFrame,
-                },
-            };
-
-            device.updateDescriptorSets(descriptorWrites, {});
         }
     }
 
