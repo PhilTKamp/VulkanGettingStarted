@@ -32,7 +32,7 @@ import vulkan_hpp;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
-constexpr uint32_t PARTICLE_COUNT = 2000;
+constexpr uint32_t PARTICLE_COUNT = 8192; // Q: If this count is not a multiple of 256 we freeze. Why? (Initial assumption is that it's due to how we're scheduling work on the GPU since were using 256 "threads")
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<char const *> validationLayers = {
