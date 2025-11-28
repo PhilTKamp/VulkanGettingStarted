@@ -24,7 +24,7 @@ find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 function (add_slang_shader_target TARGET)
         cmake_parse_arguments("SHADER" "" "" "SOURCES" ${ARGN})
         set(SHADERS_DIR shaders)
-        set (ENTRY_POINTS -entry vertMain -entry fragMain)
+        set (ENTRY_POINTS -entry vertMain -entry fragMain -entry compMain)
         add_custom_command(
                 OUTPUT ${SHADERS_DIR}
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
@@ -42,6 +42,7 @@ endfunction()
 
 set (EXEC_TARGET vulkanGettingStarted)
 
+file (GLOB SHADER_SOURCES ${CHAPTER_SHADER}.frag ${CHAPTERSHADER})
 file (GLOB SHADER_SLANG_SOURCES shaders/*.slang)
 
 add_executable (${EXEC_TARGET} ${EXEC_TARGET}.cpp)
