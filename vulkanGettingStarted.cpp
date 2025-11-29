@@ -87,6 +87,7 @@ public:
     {
         initWindow();
         initVulkan();
+        initThreads();
         mainLoop();
         cleanup();
     }
@@ -125,10 +126,11 @@ private:
     vk::raii::Pipeline computePipeline = nullptr;
 
     vk::raii::CommandPool commandPool = nullptr;
-    std::vector<vk::raii::CommandBuffer> commandBuffers;
+    std::vector<vk::raii::CommandBuffer> graphicsCommandBuffers;
 
-    vk::raii::Semaphore semaphore = nullptr;
+    vk::raii::Semaphore timelineSemaphore = nullptr;
     uint64_t timelineValue = 0;
+    std::vector<vk::raii::Semaphore> imageAvailableSemaphores;
     std::vector<vk::raii::Fence> inFlightFences;
     uint32_t currentFrame = 0;
 
@@ -187,8 +189,7 @@ private:
         createUniformBuffers();
         createDescriptorPool();
         createComputeDescriptorSets();
-        createCommandBuffers();
-        createComputeCommandBuffers();
+        createGraphicsCommandBuffers();
         createSyncObjects();
     }
 
@@ -705,36 +706,37 @@ private:
         buffer.bindMemory(bufferMemory, 0);
     }
 
-    void createCommandBuffers()
+    void createGraphicsCommandBuffers()
     {
-        commandBuffers.clear();
+        graphicsCommandBuffers.clear();
 
         vk::CommandBufferAllocateInfo allocInfo{.commandPool = commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = MAX_FRAMES_IN_FLIGHT};
 
-        commandBuffers = vk::raii::CommandBuffers(device, allocInfo);
+        graphicsCommandBuffers = vk::raii::CommandBuffers(device, allocInfo);
     }
 
-    void createComputeCommandBuffers()
+    void recordComputeCommandBuffer(vk::raii::CommandBuffer &cmdBuffer, uint32_t startIndex, uint32_t count)
     {
-        computeCommandBuffers.clear();
+        cmdBuffer.reset();
+        cmdBuffer.begin({});
 
-        vk::CommandBufferAllocateInfo allocInfo{
-            .commandPool = commandPool,
-            .level = vk::CommandBufferLevel::ePrimary,
-            .commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-        };
+        // Bind compute pipeline and descriptor sets
+        cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, *computePipeline);
+        cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *computePipelineLayout, 0, {*computeDescriptorSets[currentFrame]}, {});
 
-        computeCommandBuffers = vk::raii::CommandBuffers(device, allocInfo);
-    }
+        // Add a push constant to specify the particle range for this thread
+        struct PushConstants
+        {
+            uint32_t startIndex;
+            uint32_t count;
+        } pushConstants{startIndex, count};
 
-    void recordComputeCommandBuffer()
-    {
-        computeCommandBuffers[currentFrame].reset();
-        computeCommandBuffers[currentFrame].begin({});
-        computeCommandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eCompute, *computePipeline);
-        computeCommandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eCompute, *computePipelineLayout, 0, {computeDescriptorSets[currentFrame]}, {});
-        computeCommandBuffers[currentFrame].dispatch(PARTICLE_COUNT / 256, 1, 1);
-        computeCommandBuffers[currentFrame].end();
+        cmdBuffer.pushConstants<PushConstants>(*computePipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
+
+        uint32_t groupCount = (count + 255) / 256;
+        cmdBuffer.dispatch(groupCount, 1, 1);
+
+        cmdBuffer.end();
     }
 
     void initThreads()
@@ -744,6 +746,85 @@ private:
 
         threadWorkReady = std::vector<std::atomic<bool>>(threadCount);
         threadWorkDone = std::vector<std::atomic<bool>>(threadCount);
+
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            threadWorkReady[i] = false;
+            threadWorkDone[i] = true;
+        }
+
+        initThreadResources();
+
+        const uint32_t particlesPerThread = PARTICLE_COUNT / threadCount;
+        particleGroups.resize(threadCount);
+
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            particleGroups[i].startIndex = i * particlesPerThread;
+            particleGroups[i].count = (i == threadCount - 1) ? (PARTICLE_COUNT - i * particlesPerThread) : particlesPerThread;
+            logWrite("Thread ", i, " will process particles ", particleGroups[i].startIndex, " to ", (particleGroups[i].startIndex + particleGroups[i].count - 1), " (count: ", particleGroups[i].count, ")");
+        }
+
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            workerThreads.emplace_back(&HelloTriangleApplication::workerThreadFunc, this, i);
+            logWrite("Started worked thread ", i);
+        }
+    }
+
+    void signalThreadsToWork()
+    {
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            threadWorkDone[i] = false;
+            threadWorkReady[i] = true;
+        }
+    }
+
+    void waitForThreadsToComplete()
+    {
+        std::unique_lock<std::mutex> lock(queueSubmitMutex);
+        workCompleteCv.wait(lock, [this]()
+                            {
+            for (uint32_t i = 0; i < threadCount; i++)
+            {
+                if (!threadWorkDone[i])
+                {
+                    return false;
+                }
+            }
+            return true; });
+    }
+    void stopThreads()
+    {
+        shouldExit.store(true, std::memory_order_release);
+
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            threadWorkDone[i].store(true, std::memory_order_release);
+            threadWorkReady[i].store(false, std::memory_order_release);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(workCompleteMutex);
+            workCompleteCv.notify_all();
+        }
+
+        for (auto &thread : workerThreads)
+        {
+            if (thread.joinable())
+            {
+                thread.join();
+            }
+        }
+
+        workerThreads.clear();
+    }
+
+    void initThreadResources()
+    {
+        resourceManager.createThreadCommandPools(device, queueIndex, threadCount);
+        resourceManager.allocateCommandBuffers(device, threadCount, 1);
     }
 
     void workerThreadFunc(uint32_t threadIndex)
@@ -770,10 +851,10 @@ private:
         }
     }
 
-    void recordCommandBuffer(uint32_t imageIndex)
+    void recordGraphicsCommandBuffer(uint32_t imageIndex)
     {
-        commandBuffers[currentFrame].reset();
-        commandBuffers[currentFrame].begin({});
+        graphicsCommandBuffers[currentFrame].reset();
+        graphicsCommandBuffers[currentFrame].begin({});
 
         transition_image_layout(
             swapChainImages[imageIndex],
@@ -802,13 +883,13 @@ private:
             .pColorAttachments = &attachmentInfo,
         };
 
-        commandBuffers[currentFrame].beginRendering(renderingInfo);
-        commandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline);
-        commandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
-        commandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
-        commandBuffers[currentFrame].bindVertexBuffers(0, {*shaderStorageBuffers[currentFrame]}, {0});
-        commandBuffers[currentFrame].draw(PARTICLE_COUNT, 1, 0, 0);
-        commandBuffers[currentFrame].endRendering();
+        graphicsCommandBuffers[currentFrame].beginRendering(renderingInfo);
+        graphicsCommandBuffers[currentFrame].bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline);
+        graphicsCommandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
+        graphicsCommandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
+        graphicsCommandBuffers[currentFrame].bindVertexBuffers(0, {*shaderStorageBuffers[currentFrame]}, {0});
+        graphicsCommandBuffers[currentFrame].draw(PARTICLE_COUNT, 1, 0, 0);
+        graphicsCommandBuffers[currentFrame].endRendering();
 
         transition_image_layout(
             swapChainImages[imageIndex],
@@ -820,13 +901,13 @@ private:
             vk::PipelineStageFlagBits2::eBottomOfPipe,
             vk::ImageAspectFlagBits::eColor);
 
-        commandBuffers[currentFrame].end();
+        graphicsCommandBuffers[currentFrame].end();
     }
 
     void drawFrame()
     {
 
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, nullptr, *inFlightFences[currentFrame]);
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *imageAvailableSemaphores[currentFrame], nullptr);
         while (vk::Result::eTimeout == device.waitForFences(*inFlightFences[currentFrame], vk::True, UINT64_MAX))
             ;
 
@@ -839,88 +920,123 @@ private:
 
         updateUniformBuffer(currentFrame);
 
+        signalThreadsToWork();
+
+        recordGraphicsCommandBuffer(imageIndex);
+
+        waitForThreadsToComplete();
+
+        std::vector<vk::CommandBuffer> computeCmdBuffers;
+        computeCmdBuffers.reserve(threadCount);
+
+        for (uint32_t i = 0; i < threadCount; i++)
         {
-            recordComputeCommandBuffer();
+            try
+            {
+                computeCmdBuffers.push_back(*resourceManager.getCommandBuffer(i));
+            }
+            catch (const std::exception &)
+            {
+                // Skip the thread's command buffer on error
+            }
+        }
 
-            vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
-                .waitSemaphoreValueCount = 1,
-                .pWaitSemaphoreValues = &computeWaitValue,
-                .signalSemaphoreValueCount = 1,
-                .pSignalSemaphoreValues = &computeSignalValue,
-            };
+        // Short circuit out if we have no buffers
+        if (computeCmdBuffers.empty())
+        {
+            return;
+        }
 
-            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eComputeShader};
+        // Set up compute submission
 
-            vk::SubmitInfo computeSubmitInfo{
-                .pNext = &computeTimelineInfo,
-                .waitSemaphoreCount = 1,
-                .pWaitSemaphores = &*semaphore,
-                .pWaitDstStageMask = waitStages,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &*computeCommandBuffers[currentFrame],
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &*semaphore,
-            };
+        vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
+            .waitSemaphoreValueCount = 1,
+            .pWaitSemaphoreValues = &computeWaitValue,
+            .signalSempahoreValueCount = 1,
+            .pSignalSemaphoreValues = &computeSignalValue,
+        };
 
+        vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eComputeShader};
+
+        vk::SubmitInfo computeSubmitInfo{
+            .pNext = &computeTimelineInfo,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &*timelineSemaphore,
+            .pWaitDstStageMask = waitStages,
+            .commandBufferCount = static_cast<uint32_t>(computeCmdBuffers.size()),
+            .pCommandBuffers = computeCmdBuffers.data(),
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &*timelineSemaphore,
+        };
+
+        {
+            std::lock_guard<std::mutex> lock(queueSubmitMutex);
             queue->submit(computeSubmitInfo, nullptr);
         }
+
+        vk::PipelineStageFlags graphicsWaitStages[] = {vk::PipelineStageFlagBits::eVertexInput, vk::PipelineStageFlagBits::eColorAttachmentOutput};
+
+        std::array<vk::Semaphore, 2> waitSemaphores = {*timelineSemaphore, *imageAvailableSemaphores[currentFrame]};
+        std::array<uint64_t, 2> waitSemaphoreValues = {graphicsWaitValue, 0};
+
+        vk::TimelineSemaphoreSubmitInfo graphicsTimelineInfo{
+            .waitSemaphoreValueCount = static_cast<uint32_t>(waitSemaphoreValues.size()),
+            .pWaitSemaphoreValues = waitSemaphoreValues.data(),
+            .signalSemaphoreValueCount = 1,
+            .pSignalSemaphoreValues = &graphicsSignalValue,
+        };
+
+        vk::SubmitInfo graphicsSubmitInfo{
+            .pNext = &graphicsTimelineInfo,
+            .waitSemaphoreCount = static_cast<uint32_t>(waitSemaphores.size()),
+            .pWaitSemaphores = waitSemaphores.data(),
+            .pWaitDstStageMask = graphicsWaitStages,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &*graphicsCommandBuffers[currentFrame],
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &*timelineSemaphore,
+        };
+
         {
-            recordCommandBuffer(imageIndex);
-
-            vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eVertexInput;
-            vk::TimelineSemaphoreSubmitInfo graphicsTimelineInfo{
-                .waitSemaphoreValueCount = 1,
-                .pWaitSemaphoreValues = &graphicsWaitValue,
-                .signalSemaphoreValueCount = 1,
-                .pSignalSemaphoreValues = &graphicsSignalValue,
-            };
-
-            vk::SubmitInfo graphicsSubmitInfo{
-                .pNext = &graphicsTimelineInfo,
-                .waitSemaphoreCount = 1,
-                .pWaitSemaphores = &*semaphore,
-                .pWaitDstStageMask = &waitStage,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &*commandBuffers[currentFrame],
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &*semaphore,
-            };
-
-            queue->submit(graphicsSubmitInfo, nullptr);
-
-            // Present the image (waiting for graphics to finish)
-            vk::SemaphoreWaitInfo waitInfo{
-                .semaphoreCount = 1,
-                .pSemaphores = &*semaphore,
-                .pValues = &graphicsSignalValue,
-            };
-
-            // Waiting for graphics to complete before presenting
-            while (vk::Result::eTimeout == device.waitSemaphores(waitInfo, UINT64_MAX))
-                ;
-
-            vk::PresentInfoKHR presentInfo{
-                .waitSemaphoreCount = 0, // Q: No binary semaphores needed. Is this better? Why?
-                .pWaitSemaphores = nullptr,
-                .swapchainCount = 1,
-                .pSwapchains = &*swapChain,
-                .pImageIndices = &imageIndex,
-            };
-
-            result = queue->presentKHR(presentInfo);
-            switch (result)
-            {
-            case vk::Result::eSuccess:
-                break;
-            case vk::Result::eSuboptimalKHR:
-                std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR!\n";
-                break;
-            default:
-                break;
-            }
-
-            currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+            std::lock_guard<std::mutex> lock(queueSubmitMutex);
+            device.resetFences(*inFlightFences[currentFrame]);
+            queue->submit(graphicsSubmitInfo, *inFlightFences[currentFrame]);
         }
+
+        vk::SemaphoreWaitInfo waitInfo{
+            .semaphoreCount = 1,
+            .pSemaphores = &*timelineSemaphore,
+            .pValues = &graphicsSignalValue,
+        };
+
+        auto waitResult = device.waitSemaphores(waitInfo, UINT64_MAX);
+        if (waitResult == vk::Result::eTimeout)
+        {
+            device.waitIdle();
+            return;
+        }
+
+        vk::PresentInfoKHR presentInfo{
+            .waitSemaphoreCount = 0,
+            .pWaitSemaphores = nullptr,
+            .swapchainCount = 1,
+            .pSwapchains = &*swapChain,
+            .pImageIndices = &imageIndex,
+        };
+
+        result = queue->presentKHR(presentInfo);
+        switch (result)
+        {
+        case vk::Result::eSuccess:
+            break;
+        case vk::Result::eSuboptimalKHR:
+            std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR!\n";
+            break;
+        default:
+            break;
+        }
+
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     void createGraphicsPipeline()
@@ -1035,18 +1151,22 @@ private:
 
     void createSyncObjects()
     {
+        imageAvailableSemaphores.clear();
         inFlightFences.clear();
 
         vk::SemaphoreTypeCreateInfo semaphoreType{
             .semaphoreType = vk::SemaphoreType::eTimeline,
             .initialValue = 0,
         };
-        semaphore = vk::raii::Semaphore(device, {.pNext = &semaphoreType});
+        timelineSemaphore = vk::raii::Semaphore(device, {.pNext = &semaphoreType});
         timelineValue = 0;
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
+            iamgeAvailableSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
+
             vk::FenceCreateInfo fenceInfo{};
+            fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
             inFlightFences.emplace_back(device, fenceInfo);
         }
     }
@@ -1083,7 +1203,7 @@ private:
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &barrier};
 
-        commandBuffers[currentFrame].pipelineBarrier2(dependencyInfo);
+        graphicsCommandBuffers[currentFrame].pipelineBarrier2(dependencyInfo);
     }
 
     static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT *pCallbackData, void *)
@@ -1159,6 +1279,8 @@ private:
 
     void cleanup() const
     {
+        stopThreads();
+
         glfwDestroyWindow(window);
         glfwTerminate();
     }
