@@ -72,6 +72,14 @@ struct Particle
     }
 };
 
+template <typename... Args>
+void logWrite(Args &&...args)
+{
+#ifdef _DEBUG
+    (std::cout << ... << std::forward<Args>(args)) << std::endl;
+#endif
+}
+
 class HelloTriangleApplication
 {
 public:
@@ -732,8 +740,10 @@ private:
     void initThreads()
     {
         threadCount = 8u;
-        log("Initializing ", threadCount, " threads for sequential execution");
+        logWrite("Initializing ", threadCount, " threads for sequential execution");
+
         threadWorkReady = std::vector<std::atomic<bool>>(threadCount);
+        threadWorkDone = std::vector<std::atomic<bool>>(threadCount);
     }
 
     void workerThreadFunc(uint32_t threadIndex)
