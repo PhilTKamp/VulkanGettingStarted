@@ -37,7 +37,7 @@ void ThreadSafeResourceManager::allocateCommandBuffers(vk::raii::Device &device,
     };
 
     auto threadBuffers = device.allocateCommandBuffers(allocInfo);
-    for (const auto &buffer : threadBuffers)
+    for (auto &buffer : threadBuffers)
     {
       commandBuffers.emplace_back(std::move(buffer));
     }
