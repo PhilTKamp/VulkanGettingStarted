@@ -1524,13 +1524,25 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float>(currentTime - startTime).count();
 
-        UniformBufferObject ubo{};
-        ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
-        ubo.proj[1][1] *= -1;
+        glm::mat4 view = lookAt(glm::vec3(2.0f, 2.0f, 6.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.width), 0.1f, 20.0f);
 
-        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        proj[1][1] *= -1; // Flip Y for Vulkan
+
+        for (auto &gameObject : gameObjects)
+        {
+            gameObject.rotation.y += 0.001f; // Slowly rotate around the Y axis
+
+            glm::mat4 initialRotation = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            glm::mat4 model = gameObject.getModelMatrix() * initialRotation;
+
+            UniformBufferObject ubo{
+                .model = model,
+                .view = view,
+                .proj = proj};
+
+            memcpy(gameObject.uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+        }
     }
 
     void drawFrame()
