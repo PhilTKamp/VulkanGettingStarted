@@ -634,7 +634,7 @@ private:
         commandPool = vk::raii::CommandPool(device, poolInfo);
     }
 
-    std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands()
+    [[nodiscard]] std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands()
     {
         vk::CommandBufferAllocateInfo allocInfo{
             .commandPool = commandPool,
