@@ -180,7 +180,6 @@ private:
     vk::raii::DeviceMemory indexBufferMemory = nullptr;
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
-    std::vector<vk::raii::DescriptorSet> descriptorSets; // REMOVE: We should be able to remove this once we have the multiple objects rendering
 
     uint32_t mipLevels = 0;
     vk::raii::Image textureImage = nullptr;
@@ -1512,9 +1511,6 @@ private:
 
             commandBuffers[currentFrame].drawIndexed(indices.size(), 1, 0, 0, 0);
         }
-
-        commandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSets[currentFrame], nullptr);
-        commandBuffers[currentFrame].drawIndexed(indices.size(), 1, 0, 0, 0);
 
         commandBuffers[currentFrame].endRendering();
 
