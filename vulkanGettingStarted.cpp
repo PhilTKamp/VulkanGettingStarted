@@ -726,7 +726,12 @@ private:
     void recordComputeCommandBuffer(vk::raii::CommandBuffer &cmdBuffer, uint32_t startIndex, uint32_t count)
     {
         cmdBuffer.reset();
-        cmdBuffer.begin({});
+
+        vk::CommandBufferBeginInfo beginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        };
+
+        cmdBuffer.begin(beginInfo);
 
         // Bind compute pipeline and descriptor sets
         cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, *computePipeline);
