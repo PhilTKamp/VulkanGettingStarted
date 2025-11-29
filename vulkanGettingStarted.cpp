@@ -1497,8 +1497,22 @@ private:
         commandBuffers[currentFrame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
         commandBuffers[currentFrame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
 
+        // Bind our vertex and index buffers, (these are shared by all objects)
         commandBuffers[currentFrame].bindVertexBuffers(0, *vertexBuffer, {0});
         commandBuffers[currentFrame].bindIndexBuffer(*indexBuffer, 0, vk::IndexType::eUint32);
+
+        for (const auto &gameObject : gameObjects)
+        {
+            commandBuffers[currentFrame].bindDescriptorSets(
+                vk::PipelineBindPoint::eGraphics,
+                *pipelineLayout,
+                0,
+                *gameObject.descriptorSets[currentFrame],
+                nullptr);
+
+            commandBuffers[currentFrame].drawIndexed(indices.size(), 1, 0, 0, 0);
+        }
+
         commandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSets[currentFrame], nullptr);
         commandBuffers[currentFrame].drawIndexed(indices.size(), 1, 0, 0, 0);
 
