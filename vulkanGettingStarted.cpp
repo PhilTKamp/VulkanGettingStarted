@@ -242,6 +242,7 @@ private:
         createTextureImageView();
         createTextureSampler();
         loadModel();
+        setupGameObjects();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -1271,6 +1272,24 @@ private:
                 indices.push_back(uniqueVertices[vertex]);
             }
         }
+    }
+
+    /**
+     * Sets up the basic transforms for our game objects.
+     */
+    void setupGameObjects()
+    {
+        gameObjects[0].position = {0.0f, 0.0f, 0.0f};
+        gameObjects[0].rotation = {0.0f, 0.0f, 0.0f};
+        gameObjects[0].scale = {1.0f, 1.0f, 1.0f};
+
+        gameObjects[1].position = {-2.0f, 0.0f, -1.0f};
+        gameObjects[1].rotation = {0.0f, glm::radians(45.0f), 0.0f};
+        gameObjects[1].scale = {0.75f, 0.75f, 0.75f};
+
+        gameObjects[2].position = {2.0f, 0.0f, -1.0f};
+        gameObjects[2].rotation = {0.0f, glm::radians(-45.0f), 0.0f};
+        gameObjects[2].scale = {0.75f, 0.75f, 0.75f};
     }
 
     /**
