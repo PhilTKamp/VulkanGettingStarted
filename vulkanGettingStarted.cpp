@@ -179,10 +179,6 @@ private:
     vk::raii::Buffer indexBuffer = nullptr;
     vk::raii::DeviceMemory indexBufferMemory = nullptr;
 
-    std::vector<vk::raii::Buffer> uniformBuffers;
-    std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
-    std::vector<void *> uniformBuffersMapped;
-
     vk::raii::DescriptorPool descriptorPool = nullptr;
     std::vector<vk::raii::DescriptorSet> descriptorSets;
 
@@ -1344,19 +1340,23 @@ private:
      */
     void createUniformBuffers()
     {
-        uniformBuffers.clear();
-        uniformBuffersMemory.clear();
-        uniformBuffersMapped.clear();
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        // Create a buffer for each game object. NOTE: We should probably put this code in the game object itself.
+        for (auto &gameObject : gameObjects)
         {
-            vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
-            vk::raii::Buffer buffer({});
-            vk::raii::DeviceMemory bufferMem({});
-            createBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, buffer, bufferMem);
-            uniformBuffers.emplace_back(std::move(buffer));
-            uniformBuffersMemory.emplace_back(std::move(bufferMem));
-            uniformBuffersMapped.emplace_back(uniformBuffersMemory[i].mapMemory(0, bufferSize));
+            gameObject.uniformBuffers.clear();
+            gameObject.uniformBuffersMemory.clear();
+            gameObject.uniformBuffersMapped.clear();
+
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+            {
+                vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+                vk::raii::Buffer buffer({});
+                vk::raii::DeviceMemory bufferMem({});
+                createBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, buffer, bufferMem);
+                gameObject.uniformBuffers.emplace_back(std::move(buffer));
+                gameObject.uniformBuffersMemory.emplace_back(std::move(bufferMem));
+                gameObject.uniformBuffersMapped.emplace_back(gameObject.uniformBuffersMemory[i].mapMemory(0, bufferSize));
+            }
         }
     }
 
