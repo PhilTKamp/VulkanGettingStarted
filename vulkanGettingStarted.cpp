@@ -1337,6 +1337,10 @@ private:
      * Creates the uniform buffers that will be passed to the shader(s).
      * This is used, for example, to provide the Model View Projection
      * matrix to the shader(s).
+     *
+     * NOTE: This should probably be based on the game object itself
+     * or at least we could just store a single model view projection
+     * matrix. For learning purposes this is fine as is.
      */
     void createUniformBuffers()
     {
