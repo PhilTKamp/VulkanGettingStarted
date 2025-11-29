@@ -596,16 +596,20 @@ private:
      * I believe this can be thought of as being analogous to a connection pool.
      * The goal of this being to manage the lifetimes of its associated descriptor
      * sets.
+     *
+     * NOTE: For the multiple objects we would likely prefer for this to
+     * reuse the same uniform buffer object. Though we will need unique image samplers per
+     * texture image.
      */
     void createDescriptorPool()
     {
         std::array poolSize{
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)};
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_OBJECTS * MAX_FRAMES_IN_FLIGHT),
+            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_OBJECTS * MAX_FRAMES_IN_FLIGHT)};
 
         vk::DescriptorPoolCreateInfo poolInfo{
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = MAX_FRAMES_IN_FLIGHT,
+            .maxSets = MAX_OBJECTS * MAX_FRAMES_IN_FLIGHT,
             .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
             .pPoolSizes = poolSize.data()};
         descriptorPool = vk::raii::DescriptorPool(device, poolInfo);
