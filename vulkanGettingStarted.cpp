@@ -362,6 +362,12 @@ private:
     {
         vk::raii::ShaderModule shaderModule = createShaderModule(readFile("shaders/slang.spv"));
 
+        vk::PushConstantRange pushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+            .offset = 0,
+            .size = sizeof(uint32_t) * 2 // startIndex and count. NOTE: we should REALLY just declare this as a struct elsewhere
+        };
+
         vk::PipelineShaderStageCreateInfo computeShaderStageInfo{
             .stage = vk::ShaderStageFlagBits::eCompute,
             .module = shaderModule,
@@ -371,6 +377,8 @@ private:
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .setLayoutCount = 1,
             .pSetLayouts = &*computeDescriptorSetLayout,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange,
         };
 
         computePipelineLayout = vk::raii::PipelineLayout(device, pipelineLayoutInfo);
@@ -783,17 +791,25 @@ private:
 
     void waitForThreadsToComplete()
     {
-        std::unique_lock<std::mutex> lock(queueSubmitMutex);
-        workCompleteCv.wait(lock, [this]()
-                            {
+        std::unique_lock<std::mutex> lock(workCompleteMutex);
+
+        auto waitResult = workCompleteCv.wait_for(lock, std::chrono::milliseconds(3000), [this]()
+                                                  { return threadWorkDone[threadCount - 1].load(std::memory_order_acquire); });
+
+        // If we timed out, force completion
+        if (!waitResult)
+        {
             for (uint32_t i = 0; i < threadCount; i++)
             {
-                if (!threadWorkDone[i])
-                {
-                    return false;
-                }
+                threadWorkDone[i].store(true, std::memory_order_release);
+                threadWorkReady[i].store(false, std::memory_order_release);
             }
-            return true; });
+
+            workCompleteCv.notify_all();
+            lock.unlock();
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
     void initThreadResources()
@@ -806,23 +822,49 @@ private:
     {
         while (!shouldExit)
         {
-            // Wait for the work to be ready
-            if (!threadWorkReady[threadIndex])
+
             {
-                std::this_thread::yield();
-                continue;
+                std::unique_lock<std::mutex> lock(workCompleteMutex);
+                workCompleteCv.wait(lock, [this, threadIndex]()
+                                    { return shouldExit || threadWorkReady[threadIndex].load(std::memory_order_acquire); });
+
+                if (shouldExit)
+                {
+                    break;
+                }
+
+                if (!threadWorkReady[threadIndex].load(std::memory_order_acquire))
+                {
+                    continue;
+                }
             }
 
             const ParticleGroup &group = particleGroups[threadIndex];
+            bool workCompleted = false;
 
-            vk::raii::CommandBuffer &cmdBuffer = resourceManager.getCommandBuffer(threadIndex);
+            try
+            {
+                vk::raii::CommandBuffer *cmdBuffer = &resourceManager.getCommandBuffer(threadIndex);
+                recordComputeCommandBuffer(*cmdBuffer, group.startIndex, group.count);
+                workCompleted = true;
+            }
+            catch (const std::exception &)
+            {
+                workCompleted = false;
+            }
 
-            recordComputeCommandBuffer(cmdBuffer, group.startIndex, group.count);
+            threadWorkDone[threadIndex].store(true, std::memory_order_release);
+            threadWorkReady[threadIndex].store(false, std::memory_order_release);
 
-            threadWorkDone[threadIndex] = true;
-            threadWorkReady[threadIndex] = false;
+            if (threadIndex < threadCount - 1)
+            {
+                threadWorkReady[threadIndex + 1].store(true, std::memory_order_release);
+            }
 
-            workCompleteCv.notify_one();
+            {
+                std::lock_guard<std::mutex> lock(workCompleteMutex);
+                workCompleteCv.notify_all();
+            }
         }
     }
 
