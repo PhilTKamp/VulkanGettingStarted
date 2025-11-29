@@ -42,10 +42,16 @@ endfunction()
 
 set (EXEC_TARGET vulkanGettingStarted)
 
+file(GLOB SOURCES
+        vulkanGettingStarted.cpp
+        ThreadSafeResourceManager.h
+        ThreadSafeResourceManager.cpp
+)
+
 file (GLOB SHADER_SOURCES ${CHAPTER_SHADER}.frag ${CHAPTERSHADER})
 file (GLOB SHADER_SLANG_SOURCES shaders/*.slang)
 
-add_executable (${EXEC_TARGET} ${EXEC_TARGET}.cpp)
+add_executable (${EXEC_TARGET} ${SOURCES})
 set_target_properties(${EXEC_TARGET} PROPERTIES CXX_STANDARD 20)
 target_link_libraries(${EXEC_TARGET} Vulkan::cppm glfw)
 target_include_directories (${EXEC_TARGET} PRIVATE ${STB_INCLUDEDIR})
