@@ -43,6 +43,8 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif
 
+constexpr int MAX_OBJECTS = 3;
+
 // Define a structure to hold per-object data
 struct GameObject
 {
@@ -198,6 +200,9 @@ private:
     vk::raii::Image colorImage = nullptr;
     vk::raii::DeviceMemory colorImageMemory = nullptr;
     vk::raii::ImageView colorImageView = nullptr;
+
+    /** The list of game objects to render */
+    std::array<GameObject, MAX_OBJECTS> gameObjects;
 
     bool frameBufferResized = false;
 
