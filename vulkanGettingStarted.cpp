@@ -1313,13 +1313,25 @@ private:
 
     void mainLoop()
     {
+        const double targetFrameTime = 1.0 / 60.0;
+
         while (!glfwWindowShouldClose(window))
         {
+            double frameStartTime = glfwGetTime();
+
             glfwPollEvents();
             drawFrame();
             double currentTime = glfwGetTime();
             lastFrameTime = (currentTime - lastTime) * 1000.0;
             lastTime = currentTime;
+
+            double frameTime = currentTime - frameStartTime;
+
+            if (frameTime < targetFrameTime)
+            {
+                double sleepTime = targetFrameTime - frameTime;
+                std::this_thread::sleep_for(std::chrono::duration<double>(sleepTime));
+            }
         }
 
         device.waitIdle();
