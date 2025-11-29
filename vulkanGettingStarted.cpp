@@ -180,7 +180,7 @@ private:
     vk::raii::DeviceMemory indexBufferMemory = nullptr;
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
-    std::vector<vk::raii::DescriptorSet> descriptorSets;
+    std::vector<vk::raii::DescriptorSet> descriptorSets; // REMOVE: We should be able to remove this once we have the multiple objects rendering
 
     uint32_t mipLevels = 0;
     vk::raii::Image textureImage = nullptr;
@@ -621,43 +621,48 @@ private:
      */
     void createDescriptorSets()
     {
-        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocInfo{
-            .descriptorPool = descriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data()};
-
-        descriptorSets = device.allocateDescriptorSets(allocInfo);
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        for (auto &gameObject : gameObjects)
         {
-            vk::DescriptorBufferInfo bufferInfo{
-                .buffer = uniformBuffers[i],
-                .offset = 0,
-                .range = sizeof(UniformBufferObject)};
 
-            vk::DescriptorImageInfo imageInfo{
-                .sampler = textureSampler,
-                .imageView = textureImageView,
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+            std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout);
+            vk::DescriptorSetAllocateInfo allocInfo{
+                .descriptorPool = descriptorPool,
+                .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
+                .pSetLayouts = layouts.data()};
 
-            std::array descriptorWrites{
-                vk::WriteDescriptorSet{
-                    .dstSet = descriptorSets[i],
-                    .dstBinding = 0,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &bufferInfo},
-                vk::WriteDescriptorSet{
-                    .dstSet = descriptorSets[i],
-                    .dstBinding = 1,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                    .pImageInfo = &imageInfo}};
+            gameObject.descriptorSets.clear();
+            gameObject.descriptorSets = device.allocateDescriptorSets(allocInfo);
 
-            device.updateDescriptorSets(descriptorWrites, {});
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+            {
+                vk::DescriptorBufferInfo bufferInfo{
+                    .buffer = *gameObject.uniformBuffers[i],
+                    .offset = 0,
+                    .range = sizeof(UniformBufferObject)};
+
+                vk::DescriptorImageInfo imageInfo{
+                    .sampler = textureSampler,
+                    .imageView = textureImageView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+
+                std::array descriptorWrites{
+                    vk::WriteDescriptorSet{
+                        .dstSet = *gameObject.descriptorSets[i],
+                        .dstBinding = 0,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eUniformBuffer,
+                        .pBufferInfo = &bufferInfo},
+                    vk::WriteDescriptorSet{
+                        .dstSet = *gameObject.descriptorSets[i],
+                        .dstBinding = 1,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                        .pImageInfo = &imageInfo}};
+
+                device.updateDescriptorSets(descriptorWrites, {});
+            }
         }
     }
 
