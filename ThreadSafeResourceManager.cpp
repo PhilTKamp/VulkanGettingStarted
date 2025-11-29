@@ -5,6 +5,7 @@ void ThreadSafeResourceManager::createThreadCommandPools(vk::raii::Device &devic
   std::lock_guard<std::mutex> lock(resourceMutex);
 
   commandPools.clear();
+  commandBuffers.clear();
 
   for (uint32_t i = 0; i < threadCount; i++)
   {
@@ -12,8 +13,14 @@ void ThreadSafeResourceManager::createThreadCommandPools(vk::raii::Device &devic
         .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
         .queueFamilyIndex = queueFamilyIndex,
     };
-
-    commandPools.emplace_back(device, poolInfo);
+    try
+    {
+      commandPools.emplace_back(device, poolInfo);
+    }
+    catch (const std::exception &)
+    {
+      throw; // Re-throw the exception to be caught by caller. Q: Again, why? Why bother catching it??
+    }
   }
 }
 
@@ -28,6 +35,12 @@ void ThreadSafeResourceManager::allocateCommandBuffers(vk::raii::Device &device,
   std::lock_guard<std::mutex> lock(resourceMutex);
 
   commandBuffers.clear();
+
+  if (commandPools.size() < threadCount)
+  {
+    throw std::runtime_error("Not enough command pools for thread count!");
+  }
+
   for (uint32_t i = 0; i < threadCount; i++)
   {
     vk::CommandBufferAllocateInfo allocInfo{
@@ -36,16 +49,27 @@ void ThreadSafeResourceManager::allocateCommandBuffers(vk::raii::Device &device,
         .commandBufferCount = buffersPerThread,
     };
 
-    auto threadBuffers = device.allocateCommandBuffers(allocInfo);
-    for (auto &buffer : threadBuffers)
+    try
     {
-      commandBuffers.emplace_back(std::move(buffer));
+
+      auto threadBuffers = device.allocateCommandBuffers(allocInfo);
+      for (auto &buffer : threadBuffers)
+      {
+        commandBuffers.emplace_back(std::move(buffer));
+      }
+    }
+    catch (const std::exception &)
+    {
+      throw; // Re-throw the exception to be caught by the caller. Q: But why? why bother catching it if were just throwing it?
     }
   }
 }
 
 vk::raii::CommandBuffer &ThreadSafeResourceManager::getCommandBuffer(uint32_t index)
 {
-  std::lock_guard<std::mutex> lock(resourceMutex);
+  if (index >= commandBuffers.size())
+  {
+    throw std::runtime_error("Command buffer index out of range: " + std::to_string(index) + " (available: " + std::to_string(commandBuffers.size()) + ")");
+  }
   return commandBuffers[index];
 }
