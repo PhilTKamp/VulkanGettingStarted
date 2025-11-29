@@ -14,6 +14,9 @@ import vulkan_hpp;
 #include <unordered_map>
 #include <random>
 #include <numbers>
+#include <thread>
+#include <future>
+#include <chrono>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -22,13 +25,13 @@ import vulkan_hpp;
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <chrono>
-
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+
+#include "TheadSafeResourceManager.h"
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -115,12 +118,29 @@ private:
 
     vk::raii::CommandPool commandPool = nullptr;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
-    std::vector<vk::raii::CommandBuffer> computeCommandBuffers;
 
     vk::raii::Semaphore semaphore = nullptr;
     uint64_t timelineValue = 0;
     std::vector<vk::raii::Fence> inFlightFences;
     uint32_t currentFrame = 0;
+
+    uint32_t threadCount = 0;
+    std::vector<std::thread> workerThreads;
+    std::atomic<bool> shouldExit{false};
+    std::vector<std::atomic<bool>> threadWorkReady;
+    std::vector<std::atomic<bool>> threadWorkDone;
+
+    std::mutex queueSubmitMutex;
+    std::mutex workCompleteMutex;
+    std::condition_variable workCompleteCv;
+
+    ThreadSafeResourceManager resourceManager;
+    struct ParticleGroup
+    {
+        uint32_t startIndex;
+        uint32_t count;
+    };
+    std::vector<ParticleGroup> particleGroups;
 
     double lastFrameTime = 0.0f;
 
@@ -707,6 +727,37 @@ private:
         computeCommandBuffers[currentFrame].bindDescriptorSets(vk::PipelineBindPoint::eCompute, *computePipelineLayout, 0, {computeDescriptorSets[currentFrame]}, {});
         computeCommandBuffers[currentFrame].dispatch(PARTICLE_COUNT / 256, 1, 1);
         computeCommandBuffers[currentFrame].end();
+    }
+
+    void initThreads()
+    {
+        threadCount = 8u;
+        log("Initializing ", threadCount, " threads for sequential execution");
+        threadWorkReady = std::vector<std::atomic<bool>>(threadCount);
+    }
+
+    void workerThreadFunc(uint32_t threadIndex)
+    {
+        while (!shouldExit)
+        {
+            // Wait for the work to be ready
+            if (!threadWorkReady[threadIndex])
+            {
+                std::this_thread::yield();
+                continue;
+            }
+
+            const ParticleGroup &group = particleGroups[threadIndex];
+
+            vk::raii::CommandBuffer &cmdBuffer = resourceManager.getCommandBuffer(threadIndex);
+
+            recordComputeCommandBuffer(cmdBuffer, group.startIndex, group.count);
+
+            threadWorkDone[threadIndex] = true;
+            threadWorkReady[threadIndex] = false;
+
+            workCompleteCv.notify_one();
+        }
     }
 
     void recordCommandBuffer(uint32_t imageIndex)
