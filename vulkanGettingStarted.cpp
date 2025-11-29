@@ -795,31 +795,6 @@ private:
             }
             return true; });
     }
-    void stopThreads()
-    {
-        shouldExit.store(true, std::memory_order_release);
-
-        for (uint32_t i = 0; i < threadCount; i++)
-        {
-            threadWorkDone[i].store(true, std::memory_order_release);
-            threadWorkReady[i].store(false, std::memory_order_release);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(workCompleteMutex);
-            workCompleteCv.notify_all();
-        }
-
-        for (auto &thread : workerThreads)
-        {
-            if (thread.joinable())
-            {
-                thread.join();
-            }
-        }
-
-        workerThreads.clear();
-    }
 
     void initThreadResources()
     {
@@ -849,6 +824,32 @@ private:
 
             workCompleteCv.notify_one();
         }
+    }
+
+    void stopThreads()
+    {
+        shouldExit.store(true, std::memory_order_release);
+
+        for (uint32_t i = 0; i < threadCount; i++)
+        {
+            threadWorkDone[i].store(true, std::memory_order_release);
+            threadWorkReady[i].store(false, std::memory_order_release);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(workCompleteMutex);
+            workCompleteCv.notify_all();
+        }
+
+        for (auto &thread : workerThreads)
+        {
+            if (thread.joinable())
+            {
+                thread.join();
+            }
+        }
+
+        workerThreads.clear();
     }
 
     void recordGraphicsCommandBuffer(uint32_t imageIndex)
@@ -952,7 +953,7 @@ private:
         vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
             .waitSemaphoreValueCount = 1,
             .pWaitSemaphoreValues = &computeWaitValue,
-            .signalSempahoreValueCount = 1,
+            .signalSemaphoreValueCount = 1,
             .pSignalSemaphoreValues = &computeSignalValue,
         };
 
@@ -1163,7 +1164,7 @@ private:
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            iamgeAvailableSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
+            imageAvailableSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
 
             vk::FenceCreateInfo fenceInfo{};
             fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
@@ -1277,7 +1278,7 @@ private:
         device.waitIdle();
     }
 
-    void cleanup() const
+    void cleanup()
     {
         stopThreads();
 
