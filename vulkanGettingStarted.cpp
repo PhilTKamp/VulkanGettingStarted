@@ -787,10 +787,19 @@ private:
 
     void signalThreadsToWork()
     {
+        // Mark all threads as not done
         for (uint32_t i = 0; i < threadCount; i++)
         {
-            threadWorkDone[i] = false;
-            threadWorkReady[i] = true;
+            threadWorkDone[i].store(false, std::memory_order_release);
+        }
+
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+
+        threadWorkReady[0].store(true, std::memory_order_release);
+
+        {
+            std::lock_guard<std::mutex> lock(workCompleteMutex);
+            workCompleteCv.notify_all();
         }
     }
 
@@ -954,13 +963,14 @@ private:
 
     void drawFrame()
     {
-
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *imageAvailableSemaphores[currentFrame], nullptr);
+        // Wait for the previous frame to finish
         while (vk::Result::eTimeout == device.waitForFences(*inFlightFences[currentFrame], vk::True, UINT64_MAX))
             ;
 
-        device.resetFences(*inFlightFences[currentFrame]);
+        // Acquire the next image
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *imageAvailableSemaphores[currentFrame], nullptr);
 
+        // Update timeline values for synchronization
         uint64_t computeWaitValue = timelineValue;
         uint64_t computeSignalValue = ++timelineValue;
         uint64_t graphicsWaitValue = computeSignalValue;
