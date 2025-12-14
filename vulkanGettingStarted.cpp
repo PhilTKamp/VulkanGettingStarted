@@ -1,3 +1,4 @@
+#include "vulkan/vulkan.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -33,7 +34,7 @@ import vulkan_hpp;
 #include <tiny_obj_loader.h>
 
 #ifndef LAB_TASK_LEVEL
-#define LAB_TASK_LEVEL 1
+#define LAB_TASK_LEVEL 4
 #endif
 
 #define LAB_TASK_AS_BUILD_AND_BIND 4
@@ -1108,21 +1109,39 @@ private:
         {
             const auto &submesh = submeshes[i];
 
-            // Prepare the geometry data
-            auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR{
+            auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR {
                 .vertexFormat = vk::Format::eR32G32B32Sfloat,
                 .vertexData = vertexAddr,
                 .vertexStride = sizeof(Vertex),
                 .maxVertex = submesh.maxVertex,
                 .indexType = vk::IndexType::eUint32,
-                .indexData = indexAddr + submesh.indexOffset * sizeof(uint32_t)};
+                .indexData = indexAddr + submesh.indexOffset * sizeof(uint32_t),
+            };
 
             vk::AccelerationStructureGeometryDataKHR geometryData(trianglesData);
 
             vk::AccelerationStructureGeometryKHR blasGeometry{
                 .geometryType = vk::GeometryTypeKHR::eTriangles,
                 .geometry = geometryData,
-                .flags = vk::GeometryFlagBitsKHR::eOpaque};
+                .flags = vk::GeometryFlagBitsKHR::eOpaque,
+            };
+            // const auto &submesh = submeshes[i];
+
+            // // Prepare the geometry data
+            // auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR{
+            //     .vertexFormat = vk::Format::eR32G32B32Sfloat,
+            //     .vertexData = vertexAddr,
+            //     .vertexStride = sizeof(Vertex),
+            //     .maxVertex = submesh.maxVertex,
+            //     .indexType = vk::IndexType::eUint32,
+            //     .indexData = indexAddr + submesh.indexOffset * sizeof(uint32_t)};
+
+            // vk::AccelerationStructureGeometryDataKHR geometryData(trianglesData);
+
+            // vk::AccelerationStructureGeometryKHR blasGeometry{
+            //     .geometryType = vk::GeometryTypeKHR::eTriangles,
+            //     .geometry = geometryData,
+            //     .flags = vk::GeometryFlagBitsKHR::eOpaque};
 #if LAB_TASK_LEVEL >= LAB_TASK_AS_OPAQUE_FLAG
             // TASK07
             blasGeometry.flags = (submesh.alphaCut) ? vk::GeometryFlagsKHR(0) : vk::GeometryFlagBitsKHR::eOpaque;
