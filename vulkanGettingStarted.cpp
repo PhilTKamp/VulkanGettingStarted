@@ -1125,23 +1125,6 @@ private:
                 .geometry = geometryData,
                 .flags = vk::GeometryFlagBitsKHR::eOpaque,
             };
-            // const auto &submesh = submeshes[i];
-
-            // // Prepare the geometry data
-            // auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR{
-            //     .vertexFormat = vk::Format::eR32G32B32Sfloat,
-            //     .vertexData = vertexAddr,
-            //     .vertexStride = sizeof(Vertex),
-            //     .maxVertex = submesh.maxVertex,
-            //     .indexType = vk::IndexType::eUint32,
-            //     .indexData = indexAddr + submesh.indexOffset * sizeof(uint32_t)};
-
-            // vk::AccelerationStructureGeometryDataKHR geometryData(trianglesData);
-
-            // vk::AccelerationStructureGeometryKHR blasGeometry{
-            //     .geometryType = vk::GeometryTypeKHR::eTriangles,
-            //     .geometry = geometryData,
-            //     .flags = vk::GeometryFlagBitsKHR::eOpaque};
 #if LAB_TASK_LEVEL >= LAB_TASK_AS_OPAQUE_FLAG
             // TASK07
             blasGeometry.flags = (submesh.alphaCut) ? vk::GeometryFlagsKHR(0) : vk::GeometryFlagBitsKHR::eOpaque;
